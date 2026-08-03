@@ -1,0 +1,91 @@
+{
+  "_comment": [
+    "The self installation of the kit. This repository runs exactly the mechanism it",
+    "delivers, so every defect hits us before it hits anyone else. The sources are the",
+    "originals one level up (hooks/, skills/, commands/, tools/); `bash sync.sh` copies",
+    "them here and reports differences. Never edit anything in here, or the installation",
+    "drifts away from the delivery."
+  ],
+  "env": {
+    "DISABLE_AUTO_COMPACT": "true",
+    "SESSION_LEDGER_MAX_LINES": "150",
+    "SESSION_LEDGER_MAX_CHARS": "6000",
+    "SESSION_LEDGER_TOLERANCE_PCT": "15",
+    "SESSION_LEDGER_LINT_COOLDOWN_MIN": "180",
+    "SESSION_LEDGER_CHECKPOINT_MAX_AGE_MIN": "480",
+    "SESSION_LEDGER_CHECKPOINT_TRIGGER": "off",
+    "SESSION_LEDGER_CHECKPOINT_TRIGGER_KB": "400",
+    "SESSION_LEDGER_PROJECT_STATE": ".claude/project-state.md",
+    "SESSION_LEDGER_PROMPT_TRIGGER": "on"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-prime.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-reinject.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-reinject.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/precompact-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/ledger-lint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/prompt-checkpoint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

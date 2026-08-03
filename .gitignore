@@ -1,0 +1,18 @@
+# Runtime state of the installation. It belongs to the session, not to the source.
+.claude/log/
+.claude/session-ledger.md
+.claude/session-ledger.archive/
+.claude/.checkpoint-ready
+.claude/.ledger-lint-state
+.claude/.checkpoint-trigger-state
+# Left over from kit versions that kept the effect probe inside the project. Current ones
+# keep it outside, where the checkpoint cannot read the answers it is about to be tested on.
+.claude/.effect-probe/
+
+# Only runtime state belongs here. Anything a project keeps ON PURPOSE in .claude/, its own
+# skills or its own records, stays versioned and is not listed.
+
+.DS_Store
+
+# Editor and tool leftovers.
+*.bak

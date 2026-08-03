@@ -1,0 +1,22 @@
+name: tests
+
+# The kit ships shell hooks and one python file, so CI runs exactly what a user would run.
+# Both platforms matter: the portable-mtime code exists because `stat -f %m` means one thing
+# on BSD and another on GNU, and that defect shipped once before anyone noticed.
+on:
+  push:
+  pull_request:
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: regression net
+        run: bash tests/run.sh
+      - name: delivery and installation are identical
+        run: bash sync.sh --check

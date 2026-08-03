@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Plugin wiring. Same four hooks as settings-snippet.json, but with paths resolved",
+    "through ${CLAUDE_PLUGIN_ROOT}, because a plugin lives outside the project it serves.",
+    "",
+    "ONE THING A PLUGIN CANNOT SHIP: environment variables. A plugin's settings.json only",
+    "honours a couple of keys, and env is not among them, so DISABLE_AUTO_COMPACT stays a",
+    "manual one-line edit in the project's .claude/settings.json. Every other knob has a",
+    "working default, so the plugin is useful the moment it is installed and the env block",
+    "is tuning, not setup. See README, section Install."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/session-start-prime.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "compact|resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/session-start-reinject.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/precompact-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/ledger-lint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/prompt-checkpoint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,196 @@
+# context-manifest.yaml: the per-project config that makes the kit generic.
+#
+# The problem this solves: a planning method is pure reasoning, so making one
+# project-independent just means stripping vocabulary. Context skills are the
+# opposite. They are wired to concrete artifacts: a status file, a memory index, a
+# plan tree, an instruction file. You cannot strip those, so you parametrize them.
+#
+# The skill logic stays generic and shared. This manifest is the only thing that
+# differs per project. An init pass reads a repository, proposes this file, and the
+# same kit then works everywhere. That is what "generatable" means here: you
+# generate the config, not the skills.
+#
+# Every field has a default. An absent manifest means "use the defaults", so the kit
+# works in a fresh project with no setup at all.
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# WHO READS WHAT (be precise here, an unread config is worse than none)
+#
+# - The SKILLS read this file. The checkpoint skill uses `memory` and
+#   `compaction.checkpoint.durable_context` to know which durable stores to reconcile;
+#   that is the part that makes the skill logic project-independent.
+# - The HOOKS do NOT parse YAML. They are plain shell and take their settings from
+#   environment variables, so keep the two in sync by hand:
+#       ledger.max_lines            -> SESSION_LEDGER_MAX_LINES        (ledger-lint)
+#       ledger.budget_chars         -> SESSION_LEDGER_MAX_CHARS        (ledger-lint)
+#       ledger.tolerance_pct        -> SESSION_LEDGER_TOLERANCE_PCT    (ledger-lint)
+#       compaction.checkpoint.max_age_min
+#                                   -> SESSION_LEDGER_CHECKPOINT_MAX_AGE_MIN (guard)
+#   A few more env vars exist that this manifest deliberately does not mirror, because they
+#   are operator switches rather than project policy:
+#       SESSION_LEDGER_LINT_COOLDOWN_MIN     (ledger-lint, default 180)
+#       SESSION_LEDGER_LINT=off              (ledger-lint kill switch)
+#       SESSION_LEDGER_CHECKPOINT_TRIGGER_KB (ledger-lint, default 400: transcript growth
+#                                             since the last checkpoint before the hook
+#                                             tells the model to run one)
+#       SESSION_LEDGER_CHECKPOINT_TRIGGER=off (that nudge alone, kill switch)
+#   Set all of them in the `env` block of .claude/settings.json, which is committable.
+#
+# - Fields NOT read by anything today (they document intent, they do not configure):
+#   ledger.path, ledger.archive_dir, ledger.sections, ledger.restore_on,
+#   compaction.checkpoint.marker, compaction.guard.*, always_on.*, on_demand.*,
+#   vocabulary.*. The hooks hardcode these. Changing them here changes nothing, so keep
+#   them true to the code or delete them: a config field that looks live and is not is
+#   worse than none. `ledger.sections` in particular has already drifted once in the wild
+#   (six sections listed, seven in the code, NEXT missing).
+# - Blocks marked NOT BUILT below are design notes, not behaviour. They describe
+#   components this kit does not ship. They are kept because they are the honest
+#   roadmap, not because anything reads them today.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# The always-on budget. The single most important number in the file.
+#
+# Everything loaded on every turn competes for attention with the actual task.
+# Set a ceiling and hold it. When the spine outgrows the budget, the answer is to
+# move detail into path-scoped rules, never to raise the number.
+# ---------------------------------------------------------------------------
+always_on:
+  budget_chars: 6000          # hard ceiling for standing instruction content
+  spine: CLAUDE.md            # the thin instruction file: never-violate rules only
+  rules_dir: .claude/rules    # path-scoped detail, loaded only when a path matches
+
+# ---------------------------------------------------------------------------
+# Session Ledger: reasoning that survives compaction.
+# ---------------------------------------------------------------------------
+ledger:
+  path: .claude/session-ledger.md
+  archive_dir: .claude/session-ledger.archive
+  budget_chars: 6000          # = the SMALLEST restore budget (prime), not the largest.
+                              # The re-inject body gets 6550, prime gets 6000, the harness
+                              # hook cap is 10000 (measured worst case at 6000: 8595, so
+                              # ~1400 headroom). Advertising anything above the smallest
+                              # makes "within budget" a false assurance.
+  tolerance_pct: 15           # the lint warns past budget + tolerance, never on the exact
+                              # number: a hard line made a real session shave markup to
+                              # land at 4999, which is golf against a counter, not curation
+  max_lines: 150              # past this the ledger is carrying the wrong things
+  # The budget is allocated by priority, not by file order: every canonical section gets
+  # a floor and DROPPED/VERIFIED outrank the rest, because a naive cut at N bytes was
+  # measured to evict exactly those two on a real oversized ledger. See ledger_render.py.
+  # Restore-first order: orientation (TASK, NEXT, OPEN) before reference material.
+  # NEXT holds the single next action; it is a judgement a compacted window cannot
+  # re-derive, so it is written down rather than only spoken in the hand-off.
+  sections: [TASK, NEXT, OPEN, DECIDED, VERIFIED, DROPPED, PLAN]
+  restore_on: [startup, compact, resume]   # startup is the RELIABLE path (prime); the
+                                           # compact matcher fires late and is a bonus
+
+# ---------------------------------------------------------------------------
+# Compaction: manual, curated, guarded. Auto-compaction is off by design.
+#
+# Automatic compaction gives the model no turn to prepare and cannot be steered, so
+# it flattens reasoning into a summary that keeps what happened and loses why. The
+# alternative here: turn auto OFF, fire the `checkpoint` skill by hand before every
+# /compact (it curates the durable context and drops a freshness marker), and let a
+# PreCompact guardrail block /compact until that marker is fresh. Nothing automatic.
+# ---------------------------------------------------------------------------
+compaction:
+  auto_compact: false           # maps to env.DISABLE_AUTO_COMPACT:"true" in .claude/settings.json
+                                # (NOT a top-level autoCompactEnabled key; that one is not in
+                                #  the settings schema and is silently ignored)
+  checkpoint:
+    skill: checkpoint           # the manual "prepare compact" pass
+    marker: .claude/.checkpoint-ready   # freshness proof the skill writes in phase 7
+    # The guardrail is idle-aware: if nothing was written to the ledger since the
+    # checkpoint, /compact passes regardless of clock age (prepare at night, compact in
+    # the morning is fine). This window only bites when work HAPPENED since the checkpoint
+    # and it is also older than the window. env SESSION_LEDGER_CHECKPOINT_MAX_AGE_MIN.
+    max_age_min: 480            # 8h; generous on purpose, see above
+    # Phase 6 "bring all durable context current" reconciles the stores below, so
+    # nothing durable is left stale. The skill LOGIC is generic; these lists are how a
+    # project names its own durable stores instead of the kit hardcoding paths. The
+    # memory store is declared in the `memory:` block above. Leave a list empty and the
+    # skill falls back to model discovery (find the obvious durable docs by convention),
+    # which is softer than an explicit declaration.
+    durable_context:
+      project_state: .claude/project-state.md
+      # The carrier for what outlives a single TASK. The ledger is mortal on purpose: a new
+      # task archives it, and its DECIDED and DROPPED go with it, so a later task re-opens a
+      # settled question with no record of why it was settled. This file holds exactly that,
+      # at project scope, and the checkpoint reconciles it IN PLACE every pass. Unlike the
+      # ledger it belongs in version control. Set to null to switch it off.
+      knowledge_docs:           # docs whose FACTS a session may change; reconcile IN PLACE
+        # - notebook/*.md       # e.g. domain notes, data dictionaries, methodology
+        # - docs/architecture/*.md
+        []
+      curated_ssot:             # human-curated single-source-of-truth: flag stale, NEVER clobber
+        # - PROJECT_STATUS.md
+        []
+  guard:
+    hook: .claude/hooks/precompact-guard.sh
+    event: PreCompact
+    matcher: manual             # only guard manual /compact; auto is off
+    fail_open: true             # a hook bug must never trap you in an uncompactable window
+
+# ---------------------------------------------------------------------------
+# Heartbeat: the per-turn hook. Guards only, and silent when healthy.
+#
+# The anti-pattern this replaces is a fixed context bundle injected on every prompt.
+# A guard that fires only when something is wrong costs nothing in the normal case.
+# A bundle costs its full size every turn, forever, for content that is usually
+# irrelevant and always one command away.
+# ---------------------------------------------------------------------------
+heartbeat:
+  # NOT BUILT. No per-turn hook ships with this kit. What does exist and follows this
+  # principle is `ledger-lint` on the Stop event: it speaks only when the ledger has
+  # outgrown its budget or a checkpoint is overdue, is completely silent otherwise, and
+  # never renders anything into the transcript. The guards below describe what a fuller
+  # heartbeat would check, they are not running.
+  silent_when_healthy: true
+  guards:
+    - id: vcs_freshness       # warn when the working tree is far behind upstream
+      threshold_commits: 20
+    - id: review_drift        # warn on too many, or too old, open reviews
+      max_open: 3
+      max_age_minutes: 30
+    - id: nested_instructions # nested instruction files do not survive compaction
+  # Everything below is explicitly NOT injected per turn. It is pulled on demand.
+  never_inject:
+    - project_status_excerpt
+    - recent_task_log
+    - open_decision_records
+    - full_review_list
+
+# ---------------------------------------------------------------------------
+# Memory: a retrieval store with a thin hot index, not an always-on table of contents.
+#
+# An index that lists every note on every turn spends attention to save a search
+# that costs nothing at the moment it is actually needed.
+# ---------------------------------------------------------------------------
+memory:
+  dir: null                   # null = harness default location
+  hot_index_max_lines: 40     # only genuinely always-relevant pointers
+  hot_index_file: MEMORY.md
+  cold_index_file: MEMORY-INDEX.md   # the long tail, retrieved on demand
+  p0_rules: []                # rule files re-injected as a digest after compaction
+  digest_only: true           # inject name + description + path, never full text
+
+# ---------------------------------------------------------------------------
+# On-demand entry points. These replace what the heartbeat used to push.
+# ---------------------------------------------------------------------------
+on_demand:
+  focus_pull: /update         # scoped, work-focus-aware context pull
+  status: /status             # project snapshot
+  budget_chars: 8000          # ceiling for a single on-demand pull
+
+# ---------------------------------------------------------------------------
+# Vocabulary: lets generic skills speak the project's language without hardcoding it.
+# Leave empty to use neutral defaults.
+# ---------------------------------------------------------------------------
+vocabulary:
+  language: en                # prose language for generated content
+  work_unit: sprint
+  decision_record: ADR
+  plan_dir: null

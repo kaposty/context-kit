@@ -1,0 +1,175 @@
+{
+  "_comment": [
+    "Session Ledger + Checkpoint wiring for .claude/settings.json.",
+    "Merge into your existing settings; do not replace the whole file. Paths are",
+    "relative to the project root. Every hook must be executable:",
+    "chmod +x .claude/hooks/*.sh",
+    "",
+    "System in one line: auto-compaction is OFF, you fire the checkpoint skill by",
+    "hand ('prepare compact') before every /compact, and a PreCompact guardrail",
+    "blocks /compact until that checkpoint left a fresh marker. Nothing automatic.",
+    "",
+    "TURNING AUTO-COMPACTION OFF: use env.DISABLE_AUTO_COMPACT, NOT a top-level",
+    "'autoCompactEnabled' key. That key does not exist in the settings schema and is",
+    "silently ignored (the schema sets additionalProperties:true, so it neither errors",
+    "nor does anything). The schema does document DISABLE_AUTO_COMPACT as an environment",
+    "setting, and the env block in settings.json is committable, so this is repo-wide and",
+    "reproducible. Related knobs the schema lists: DISABLE_COMPACT (disables compaction",
+    "entirely), CLAUDE_CODE_AUTO_COMPACT_WINDOW and CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+    "(threshold tuning). Merge the env block key-by-key if your settings.json already",
+    "has one; do not replace an existing env object.",
+    "",
+    "SessionStart hooks: 'startup' primes once and restores the ledger regardless of its",
+    "age (chats are timeless, and a clock that retires a ledger strands live conversations);",
+    "'compact'/'resume' hand the reasoning back. A running auto-compaction does not raise",
+    "SessionStart at all, which is one more reason auto is off here.",
+    "",
+    "PreCompact matcher 'manual': the guardrail only guards manual /compact (auto is off).",
+    "It fails open on any error and lets an 'auto' trigger through, so it can never trap",
+    "you in a window you cannot compact. It blocks on a missing marker AND on a marker",
+    "sitting over an empty ledger, so a checkpoint that captured nothing does not pass.",
+    "",
+    "UserPromptSubmit -> prompt-checkpoint.sh: asking for the checkpoint in words has to keep",
+    "working after a compaction. The skill description carries trigger phrases, but skill",
+    "descriptions are the one piece of startup content a compaction does not restore, so that",
+    "route dies at exactly the moment it is needed: 'prepare for compaction' is said before a",
+    "compaction, and by then there has usually already been one. A hook is configuration, not",
+    "context, so it survives. It only injects an instruction, it never blocks or edits the",
+    "prompt, and it ignores anything longer than 160 characters so a discussion ABOUT the",
+    "checkpoint does not fire one. Off switch: SESSION_LEDGER_PROMPT_TRIGGER=off.",
+    "",
+    "Stop -> ledger-lint.sh: both mechanical guards live here, and neither is visible to",
+    "the user. (1) It warns when the ledger outgrows its budget or grows sections outside",
+    "the canonical seven; that exists because the prose instruction to keep the ledger small",
+    "was measured against a real session and lost (177 lines / 18 KB, 13 sections).",
+    "(2) OPT-IN, off by default: it can fire the checkpoint by itself once the transcript",
+    "has grown past SESSION_LEDGER_CHECKPOINT_TRIGGER_KB (400) since the last marker. That",
+    "is the one thing the PreCompact guardrail cannot do, because PreCompact output reaches",
+    "only the user and never the model. It ships off anyway: a pass that fires itself",
+    "interrupts work nobody asked to interrupt, and the guardrail already refuses an",
+    "unprepared /compact, so nothing is lost by waiting for the human to fire it.",
+    "Both are delivered as hookSpecificOutput.additionalContext with exit code 0, so they",
+    "reach the model as a system reminder and never appear in the transcript. Rate-limited,",
+    "so neither can nag every turn. Off switches: SESSION_LEDGER_LINT=off for the size",
+    "check. Opt into the self-firing pass with SESSION_LEDGER_CHECKPOINT_TRIGGER=on.",
+    "",
+    "The SESSION_LEDGER_* env values above are what the hooks actually read: the manifest",
+    "documents intent, the shell hooks take env vars. Keep the two in sync.",
+    "",
+    "SESSION_LEDGER_PROJECT_STATE names the second carrier, the one that outlives a task.",
+    "It defaults to .claude/project-state.md, and that default is only right for a project",
+    "that has no state file yet. Point it at the file you already keep, or the checkpoint",
+    "creates a SECOND state document next to your existing one and the two drift apart.",
+    "Measured in a real repository: an 83 KB curated status file was the actual source of",
+    "truth, nothing named it, and the kit was one checkpoint away from starting a rival.",
+    "Whatever the value ends up being, decide whether that file belongs in git: the ledger",
+    "and the checkpoint marker are session-local and gitignored, this one is not.",
+    "",
+    "WHY MAX_CHARS IS 6000, and why it is a band and not a hard line: three numbers",
+    "describe the same thing, and the advertised one has to be the strictest, or green is",
+    "a false promise. The re-inject body gets 6550 characters, the prime restore gets 6000",
+    "(it also prints the maintenance protocol and shares one 10000-character hook cap;",
+    "measured worst case at 6000 is 8595, so ~1400 of headroom). The smallest restore is",
+    "therefore 6000, and that is what MAX_CHARS mirrors.",
+    "",
+    "SESSION_LEDGER_TOLERANCE_PCT exists because of a measured failure mode: with a hard",
+    "5000 and a warning on the first character over, a real session started rewriting",
+    "entries and stripping markup to land at 4999. That is character golf against a",
+    "counter, it burns a turn and changes nothing about what the ledger carries. The",
+    "warning now fires only past MAX_CHARS + tolerance, and its text says explicitly to",
+    "delete finished content rather than to compress wording.",
+    "",
+    "LOADING THE LEDGER BACK after a /compact (measured live, 2 runs):",
+    "- SessionStart(compact) reinject DOES fire on a manual /compact, but a few minutes",
+    "  late, so it can lose the race against your next message. Best-effort, kept.",
+    "- A PostCompact hook was tried and REMOVED: it failed live with 'Hook cancelled'",
+    "  and its injection is not doc-supported anyway. Do not re-add it.",
+    "- The reliable carrier is the ledger FILE on disk. When both hooks miss, the model",
+    "  re-reads .claude/session-ledger.md itself and continues. Make that deterministic",
+    "  by adding one line to your project's instruction file (CLAUDE.md/AGENTS.md), which",
+    "  survives compaction. The restore output ends with a canary line, so the instruction",
+    "  can key off it: 'After a compaction, if you do not see a Canary CTX-LEDGER-RESTORED",
+    "  line in context, read .claude/session-ledger.md before continuing.'"
+  ],
+  "env": {
+    "DISABLE_AUTO_COMPACT": "true",
+    "SESSION_LEDGER_MAX_LINES": "150",
+    "SESSION_LEDGER_MAX_CHARS": "6000",
+    "SESSION_LEDGER_TOLERANCE_PCT": "15",
+    "SESSION_LEDGER_CHECKPOINT_MAX_AGE_MIN": "480",
+    "SESSION_LEDGER_CHECKPOINT_TRIGGER_KB": "400",
+    "SESSION_LEDGER_CHECKPOINT_TRIGGER": "off",
+    "SESSION_LEDGER_PROJECT_STATE": ".claude/project-state.md",
+    "SESSION_LEDGER_PROMPT_TRIGGER": "on"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-prime.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-reinject.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-reinject.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/precompact-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/ledger-lint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/prompt-checkpoint.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

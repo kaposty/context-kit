@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use or reference this kit, please cite it as below."
+title: "The Context Kit: session ledger, checkpoint and compaction guardrail for Claude Code"
+type: software
+authors:
+  - family-names: Kaposty
+    given-names: Mats
+version: 1.0.0
+date-released: 2026-08-03
+url: "https://github.com/kaposty/context-kit"
+repository-code: "https://github.com/kaposty/context-kit"
+license: MIT
+abstract: "A context kit for Claude Code. A session ledger carries the reasoning of a session across the compaction that would otherwise keep what happened and lose why; a manual checkpoint pass brings every durable store current before the summary is taken; a guardrail refuses a compaction from an unprepared state. Silent by construction, and project neutral."
+keywords:
+  - context-engineering
+  - claude-code
+  - agent-skills
+  - compaction
+  - agent-memory
