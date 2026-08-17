@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-08-17)
 
 Every defect below was found the same way: by installing the kit somewhere that is not this
 repository, or by reading the logs of installations that had been running for weeks, and
@@ -102,6 +102,12 @@ touched. Two entries correct a premise rather than a line of code, and they say 
 - **The assertion count check forced the changelog to falsify its own history**, demanding the
   current number in the 1.0.0 entry, which shipped with 66. Released sections are history and
   are no longer swept forward.
+- **The citation file was a fourth copy of the version number that nothing checked.** Three
+  files were compared against each other, and `CITATION.cff` was not one of them, so it was
+  free to keep announcing the previous release from the box GitHub renders in the sidebar and
+  every citation manager reads. Found while cutting this release: the version and the release
+  date were both a version behind. The check now covers all four, and compares the date in
+  `date-released` against the date in the changelog heading.
 - Fourteen more assertions, 79 in total, each one seen red against the version that still carried
   the defect before it was kept. Two of the fourteen caught defects in the fix itself: BSD `tr`
   reads `' \t\n'` as three literal characters and deletes every `t` and `n` in the file, and

@@ -8,7 +8,7 @@
       "name": "context-kit",
       "source": "./",
       "description": "Session ledger, checkpoint pass and compaction guardrail for long Claude Code sessions. Silent by construction.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   ],
   "description": "One plugin: the context kit that keeps long Claude Code sessions sharp."

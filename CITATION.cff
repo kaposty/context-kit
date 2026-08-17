@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Kaposty
     given-names: Mats
-version: 1.0.0
-date-released: 2026-08-03
+version: 1.1.0
+date-released: 2026-08-17
 url: "https://github.com/kaposty/context-kit"
 repository-code: "https://github.com/kaposty/context-kit"
 license: MIT

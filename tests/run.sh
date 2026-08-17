@@ -838,16 +838,38 @@ for entry in market.get("plugins", []):
     elif got != want:
         bad.append("version-drift:plugin-%s-vs-marketplace-%s" % (want, got))
 # The changelog is where a reader looks up what a version contains, so a release the
-# changelog has never heard of is a release nobody can read.
+# changelog has never heard of is a release nobody can read. The heading also carries the
+# release DATE, which is picked up below.
+released = None
 path = os.path.join(kit, "CHANGELOG.md")
 if want and os.path.exists(path):
     text = open(path, encoding="utf-8").read()
-    if not re.search(r'^##\s+%s\b' % re.escape(want), text, re.M):
+    head = re.search(r'^##\s+%s\b[^\n(]*(?:\(([0-9-]+)\))?' % re.escape(want), text, re.M)
+    if not head:
         bad.append("changelog-never-mentions:" + want)
+    else:
+        released = head.group(1)
+# CITATION.cff IS THE FOURTH COPY OF THE SAME NUMBER, and the one with the widest reach:
+# GitHub renders it as "Cite this repository" in the sidebar, and every citation manager
+# reads it. Nothing here ever looked at it, so while three files moved together it was free
+# to keep announcing the previous release to the most prominent box on the page. It carries
+# the release date as well, and a date that disagrees with the changelog heading is the same
+# defect in the same file, so both are compared.
+path = os.path.join(kit, "CITATION.cff")
+if want and os.path.exists(path):
+    text = open(path, encoding="utf-8").read()
+    found = re.search(r'^version:\s*"?([^"\s]+)"?\s*$', text, re.M)
+    if not found:
+        bad.append("citation-cff-has-no-version")
+    elif found.group(1) != want:
+        bad.append("version-drift:plugin-%s-vs-citation-%s" % (want, found.group(1)))
+    when = re.search(r'^date-released:\s*"?([0-9-]+)"?\s*$', text, re.M)
+    if released and when and when.group(1) != released:
+        bad.append("date-drift:changelog-%s-vs-citation-%s" % (released, when.group(1)))
 print(",".join(sorted(set(bad))) if bad else "OK")
 PY
 )"
-[ "$VERSION_PROBLEMS" = "OK" ] && ok "both manifests and the changelog state the same version" \
+[ "$VERSION_PROBLEMS" = "OK" ] && ok "every copy of the version number agrees, citation file included" \
                               || bad "the version drifted between its copies" "$VERSION_PROBLEMS"
 
 # ---------------------------------------------------------------------------
