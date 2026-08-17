@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-Four defects, all found the same way: by installing the kit somewhere that is not this
-repository and measuring what happened. Three of the four were invisible from inside a
-working checkout, which is why the test suite grew a third install layout before anything
-else was touched.
+Every defect below was found the same way: by installing the kit somewhere that is not this
+repository, or by reading the logs of installations that had been running for weeks, and
+measuring what actually happened. Most of them were invisible from inside a working
+checkout, which is why the test suite grew a third install layout before anything else was
+touched. Two entries correct a premise rather than a line of code, and they say so.
 
 - **`/brief` and `/prove` could never find their scripts on a plugin install.** The shipped
   line resolved through `${CLAUDE_PLUGIN_ROOT}`, which is substituted for hook commands and
@@ -20,8 +21,17 @@ else was touched.
   ones that were failing in the field.
 - **The kit denied a settings key that exists.** Three places said `autoCompactEnabled` is not
   real and is silently ignored. The binary carries it in the schema and resolves
-  `if (DISABLE_AUTO_COMPACT) return false; return autoCompactEnabled ?? true`. The
-  recommendation was right, the reason was invented.
+  `if (DISABLE_COMPACT) return false; if (truthy(DISABLE_AUTO_COMPACT)) return false; return
+  autoCompactEnabled ?? true`. The recommendation was right, the reason was invented.
+- **Nothing ever checked whether auto-compaction was actually off.** Every file here assumed
+  it, the guardrail is wired to the `manual` matcher so an automatic compaction runs straight
+  past it, and a plugin cannot ship an `env` block, so a plugin-only install had it wrong by
+  default. Measured on the machine this kit was built on: the global settings carried no `env`
+  block at all. The session-start hook now says so once, and it reads the VALUE rather than the
+  presence, because the harness accepts only `1`, `true`, `yes` and `on`: `DISABLE_AUTO_COMPACT=0`
+  and a typo both leave auto-compaction running while reading to a human like the opposite. It
+  stays quiet when either of the other two doors (`DISABLE_COMPACT`, `autoCompactEnabled: false`)
+  is already closed.
 - **The standalone install overwrote without a word.** Five `cp -R` lines, over the most
   generic names in the namespace (`brief`, `checkpoint`, `prove`, `session-ledger`), with
   nothing about collisions, backups or removal anywhere in the docs. There is now a check that
@@ -32,8 +42,44 @@ else was touched.
   belonging to the project.
 - **`DISABLE_AUTO_COMPACT` now states its price** where it is recommended. It removes the
   harness's own net for a full window, and the kit's replacement ships off.
-- Two more assertions, 68 in total, each one seen red against the version that still carried
-  the defect before it was kept.
+- **The ledger warning fired after the restore had already cut.** `ledger-lint.sh` stated its
+  own rule as "MAX_CHARS must equal the smallest restore budget", which was written before the
+  tolerance band existed. The warning does not fire at MAX_CHARS, it fires at MAX_CHARS plus
+  the band, so 6000 and 15 percent left a ledger free to sit at 6899 characters against a 6000
+  restore with nothing said. Measured over 217 restores in two dogfooded projects: 11 came back
+  INCOMPLETE, and every one of them emitted between 6480 and 6593 bytes, inside that silent
+  stretch. The rule is now `MAX_CHARS * (1 + TOLERANCE) <= smallest restore budget`, the
+  default moves to 5200 (5980 with the band), and the suite derives both sides from the shipped
+  files, the settings snippet included, instead of trusting the comment.
+- **A stale partial copy under `.claude/` overrode a current plugin, and nothing could notice.**
+  The commands probe `.claude/` first, so an old file there wins over the plugin instead of
+  sitting beside it. The one mechanism against going stale is part of the installation, so a
+  partial copy without `hooks/` has no checker at all, and the checker in the plugin cache
+  verifies the cache against the manifest next to it and is therefore always clean. The
+  session-start hook now compares the local copy against the installed plugin, which is the
+  question a travelling manifest can never answer. Silent when they match, when the local
+  version is adopted, and inside the kit repository itself, where the two differ by design.
+- **The integrity report told you to overwrite in one direction.** A digest cannot tell an old
+  file from an improved one. Measured in a real project whose installation was AHEAD of the
+  kit: following that advice would have deleted the better files. It now says which way is not
+  knowable and leaves the call to the reader.
+- **A marker from one session waved another one through.** `.claude/.checkpoint-ready` was a
+  single shared file, and the guardrail tests freshness, not authorship, so a session that had
+  never checkpointed passed the moment any other session set the marker. Measured in a
+  repository with four concurrent sessions: two of them reported the same marker timestamp to
+  the second, because it was the same file. The marker is now derived from the session id the
+  hook already receives, both session-start hooks state the exact path so the checkpoint can
+  write it, the block text repeats it, and stale ones are reaped after seven days
+  (`SESSION_LEDGER_MARKER_TTL_DAYS`). Without an id nothing can be attributed, so the shared
+  marker still counts: a guardrail that locks a session out of its own window would be worse
+  than the case it prevents.
+- **The assertion count check forced the changelog to falsify its own history**, demanding the
+  current number in the 1.0.0 entry, which shipped with 66. Released sections are history and
+  are no longer swept forward.
+- Twelve more assertions, 77 in total, each one seen red against the version that still carried
+  the defect before it was kept. Two of the twelve caught defects in the fix itself: BSD `tr`
+  reads `' \t\n'` as three literal characters and deletes every `t` and `n` in the file, and
+  BSD `sed` has no `\|` in a basic expression.
 
 ## 1.0.0 (2026-08-03)
 
@@ -63,7 +109,7 @@ claim without its provenance is a belief.
 - **`sync.sh`**, which derives what to copy from the filesystem rather than from a typed list.
   The typed list was itself a defect: a newly added hook shipped, never reached the
   installation, and `--check` still reported "identical".
-- **68 assertions** in `tests/run.sh`, green on macOS with bash 3.2 and on Ubuntu 24.04 with
+- **66 assertions** in `tests/run.sh`, green on macOS with bash 3.2 and on Ubuntu 24.04 with
   bash 5.2 and Python 3.12. Every one of them was seen red against the version that still had
   the defect. One is aimed at the suite itself: a checker that dies must go red, not silently
   green.

@@ -46,6 +46,11 @@ STDIN_JSON="$(cat 2>/dev/null || true)"
 
 SOURCE="$(printf '%s' "$STDIN_JSON" \
   | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+# Read for one reason only: the checkpoint marker is per session, so the session has to be
+# told the filename it must write. This hook covers compact, resume and fork, which is
+# exactly where an earlier statement of it has just been summarised away.
+SESSION_ID="$(printf '%s' "$STDIN_JSON" \
+  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 
 # Instrumentation: every call leaves a line, so it is provable whether the harness
 # really invokes this hook after a real /compact (the transcript alone is ambiguous:
@@ -119,6 +124,8 @@ else
   _add "_Restore INCOMPLETE (no canary): the block above is cut or degraded, so parts of the"
   _add "reasoning are missing. Read \`$LEDGER\` before you rely on it._"
 fi
+
+[ -n "$SESSION_ID" ] && { _add ""; _add "Checkpoint marker for this session: \`.claude/.checkpoint-ready.${SESSION_ID}\`"; }
 
 # Suppressed JSON result, same contract as the prime hook: the model gets the restore, the
 # transcript stays clean. json.dumps handles the escaping, which a restored ledger line

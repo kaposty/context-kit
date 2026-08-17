@@ -37,8 +37,12 @@ Nothing may be stale. Work the phases in order, each one is a quality gate:
    - correct project knowledge docs this session changed, in place (do not append blindly).
    - test: is there a durable file this session made false or incomplete? If yes, the phase
      is not done.
-7. Write the freshness marker: `mkdir -p .claude && touch .claude/.checkpoint-ready`. Only
-   AFTER phases 1 through 6, never as the first step.
+7. Write the freshness marker, and it is PER SESSION: the session-start block named the path
+   on a line beginning `Checkpoint marker for this session:`. Write that file
+   (`.claude/.checkpoint-ready.<session id>`), falling back to `.claude/.checkpoint-ready`
+   only if the path is nowhere to be found, and say so if you fall back. Never invent an id
+   or take one from a restored ledger, it belongs to another session. Only AFTER phases 1
+   through 6, never as the first step.
 8. Give a short, explicit hand-off: what was persisted (ledger / project state / memory /
    N decisions), the "what is next" line verbatim, any bloat warning, then exactly:
    **"Checkpoint saved. Safe to run /compact now."**

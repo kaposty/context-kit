@@ -29,12 +29,23 @@
 #
 # Silent when healthy: a ledger within limits and a recent checkpoint produce no output.
 #
-# THE NUMBER IS NOT FREE. MAX_CHARS must equal the SMALLEST restore body budget in this
-# kit, which is the prime hook's RESTORE_BUDGET (6000); the re-inject body gets 6550. Any
-# higher and this check goes green on a ledger that the restore then clips, which is a
-# false assurance: exactly the failure mode the lint exists to catch. If you raise a
-# restore budget, this number does not follow automatically. Raise it only after the
-# smallest one moved.
+# THE NUMBER IS NOT FREE, AND THE INVARIANT IS NOT THE ONE THIS COMMENT USED TO STATE. It
+# said MAX_CHARS must EQUAL the smallest restore body budget in this kit (the prime hook's
+# RESTORE_BUDGET, 6000; the re-inject body gets 6550). That was written before the tolerance
+# band below existed, and the band moved the thing that actually matters. The warning does
+# not fire at MAX_CHARS, it fires at MAX_CHARS plus the band, so with 6000 and 15 percent a
+# ledger could sit at 6899 characters against a 6000 restore and nothing was said.
+#
+# WHAT THAT COST, measured across two dogfooded projects and 217 restores: 11 came back
+# INCOMPLETE, and every one of them emitted between 6480 and 6593 bytes, that is inside the
+# silent band. Canonical reasoning was dropped at exactly the moment it was needed, by the
+# one mechanism built to prevent it.
+#
+#   MAX_CHARS * (1 + TOLERANCE_PCT/100)  <=  smallest restore budget
+#
+# is therefore the rule, and tests/run.sh derives both sides from the shipped files rather
+# than trusting this paragraph. A warning that only fires once the loss has happened is not
+# a warning. If you raise a restore budget, nothing here follows automatically.
 #
 # AND IT WARNS WITH A BAND, NOT ON THE EXACT NUMBER. Measured on a real session: a limit
 # of 5000 with a warning on the very first character over produced character golf. The model
@@ -43,7 +54,7 @@
 # opposite of curation. So the warning fires only past a tolerance band: a few percent
 # over is normal breathing, and the restore handles it by priority anyway.
 #
-# Overrides: SESSION_LEDGER_MAX_LINES (150), SESSION_LEDGER_MAX_CHARS (6000),
+# Overrides: SESSION_LEDGER_MAX_LINES (150), SESSION_LEDGER_MAX_CHARS (5200),
 #            SESSION_LEDGER_TOLERANCE_PCT (15),
 #            SESSION_LEDGER_LINT_COOLDOWN_MIN (180), SESSION_LEDGER_LINT=off to disable.
 #            SESSION_LEDGER_CHECKPOINT_TRIGGER=on to opt into the self-firing checkpoint
@@ -59,7 +70,7 @@ STATE=".claude/.ledger-lint-state"
 MARKER=".claude/.checkpoint-ready"
 TSTATE=".claude/.checkpoint-trigger-state"
 MAX_LINES="${SESSION_LEDGER_MAX_LINES:-150}"
-MAX_CHARS="${SESSION_LEDGER_MAX_CHARS:-6000}"   # = smallest restore budget, see header
+MAX_CHARS="${SESSION_LEDGER_MAX_CHARS:-5200}"   # 5200 + 15% = 5980 <= 6000, see header
 TOLERANCE_PCT="${SESSION_LEDGER_TOLERANCE_PCT:-15}"   # band before warning, see header
 # 180, not 60. At 60 a ledger that hovers near the limit produced six warnings in six
 # hours in a real session. The warning is a nudge, not a deadline: the restore degrades

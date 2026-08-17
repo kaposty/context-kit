@@ -5,7 +5,7 @@ by Mats Kaposty
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](#install-as-a-claude-code-plugin)
 [![Tests](https://img.shields.io/github/actions/workflow/status/kaposty/context-kit/test.yml?label=tests)](https://github.com/kaposty/context-kit/actions/workflows/test.yml)
-[![Verification](https://img.shields.io/badge/verification-68%20assertions-blue)](#verify-then-prove)
+[![Verification](https://img.shields.io/badge/verification-77%20assertions-blue)](#verify-then-prove)
 
 **Ledger · Checkpoint · Guardrail**
 
@@ -78,7 +78,7 @@ session-start block becomes visible text instead of a suppressed result. So the 
 almost nothing" promise below holds with `python3` present. No Windows support outside WSL.
 
 Measured on both: macOS with the bash 3.2 it still ships, and Ubuntu 24.04 with bash 5.2 and
-Python 3.12 on arm64, 68 of 68 green in each. Both matter for a real reason: `stat -f %m` is
+Python 3.12 on arm64, 77 of 77 green in each. Both matter for a real reason: `stat -f %m` is
 mtime on BSD and mount point on GNU, and that difference shipped a silent defect once.
 
 ## Install (as a Claude Code plugin)
@@ -255,7 +255,7 @@ the session, not to the source, so add it to your `.gitignore`:
 ```gitignore
 .claude/session-ledger.md
 .claude/session-ledger.archive/
-.claude/.checkpoint-ready
+.claude/.checkpoint-ready*
 .claude/.ledger-lint-state
 .claude/.checkpoint-trigger-state
 .claude/.effect-probe/
@@ -271,7 +271,7 @@ KIT=path/to/context-kit
 (cd "$KIT" && find hooks skills commands tools -type f ! -name hooks.json ! -name '.DS_Store') \
   | while read -r f; do rm -f ".claude/$f"; done
 find .claude/skills .claude/hooks .claude/commands .claude/tools -type d -empty -delete
-rm -f .claude/.kit-manifest .claude/.checkpoint-ready .claude/.ledger-lint-state \
+rm -f .claude/.kit-manifest .claude/.checkpoint-ready* .claude/.ledger-lint-state \
       .claude/.checkpoint-trigger-state
 # then take the kit's hook entries and its DISABLE_AUTO_COMPACT / SESSION_LEDGER_* keys back
 # out of .claude/settings.json, and the appended block back out of CLAUDE.md
@@ -289,12 +289,12 @@ taking that path in the first place.
 Two different questions, and most tools only answer the first.
 
 ```bash
-bash tests/run.sh    # 68 assertions over the renderer, the hooks and the tools
+bash tests/run.sh    # 77 assertions over the renderer, the hooks and the tools
 ```
 
 That proves the **mechanics**: the parts behave, the budget holds, the canary is never
 printed over a damaged restore. Run it against the commit before the release shaping and many
-go red, so the net can actually fail. One of the 68 is aimed at the suite itself: a checker
+go red, so the net can actually fail. One of the 77 is aimed at the suite itself: a checker
 that dies must go red, not silently green, which is how a broken check once passed while
 measuring nothing.
 

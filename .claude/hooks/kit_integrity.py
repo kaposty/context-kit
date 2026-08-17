@@ -103,17 +103,104 @@ def render(missing, changed, adopted_count):
         lines.append(line)
     lines.append("")
     lines.append(
-        "Say this in one line and carry on, it is the user's call and not yours. Copy the "
-        "files from the kit to update, or, if a change here is deliberate, add its path to "
-        "`%s` (one per line) and it stops being reported." % ADOPTED
+        "Say this in one line and carry on, it is the user's call and not yours. DO NOT "
+        "OFFER TO OVERWRITE: a file can differ because it is older than what shipped or "
+        "because it was improved here, and a digest cannot tell the two apart. Measured in "
+        "a real project: the installation was AHEAD of the kit, and copying from the kit "
+        "would have deleted the better files. If a change here is deliberate, add its path "
+        "to `%s` (one per line) and it stops being reported." % ADOPTED
     )
     if adopted_count:
         lines.append("(%d file(s) already adopted and not counted above.)" % adopted_count)
     return "\n".join(lines)
 
 
+SHADOW_DIRS = ("hooks", "tools", "commands", "skills")
+
+
+def render_shadow(differing, adopted_count):
+    lines = ["# Kit integrity", ""]
+    lines.append(
+        "%d file(s) under `.claude/` differ from the context-kit plugin installed on this "
+        "machine, and the local copy is the one that runs: the commands probe `.claude/` "
+        "first, so an old file there overrides a current plugin instead of sitting beside it."
+        % len(differing)
+    )
+    lines.append("")
+    shown = sorted(differing)[:NAME_LIMIT]
+    rest = len(differing) - len(shown)
+    line = "differ: %s" % ", ".join(shown)
+    if rest > 0:
+        line += " and %d more" % rest
+    lines.append(line)
+    lines.append("")
+    lines.append(
+        "Say this in one line and carry on, it is the user's call and not yours. WHICH WAY "
+        "IS NOT KNOWN FROM HERE: the local copy can be older than the plugin or newer than "
+        "it, and nothing on disk says which, so do not offer to overwrite either side. If "
+        "the local version is deliberate, add its path to `%s` (one per line) and it stops "
+        "being reported." % ADOPTED
+    )
+    if adopted_count:
+        lines.append("(%d file(s) already adopted and not counted above.)" % adopted_count)
+    return "\n".join(lines)
+
+
+def shadow(kit_root, project_root):
+    """Compare the copy under <project_root>/.claude against the kit at <kit_root>.
+
+    This is the one question the manifest alone cannot answer. The header above says so:
+    an installation is offline, so its manifest can only report "are my files the ones that
+    shipped", never "am I up to date". A plugin changes that, because the cache on this
+    machine is a second, independent reference. Only files present on BOTH sides are
+    compared: a file that exists only in the kit is reached through the lookup fallback and
+    shadows nothing, and reporting it would turn this into noise.
+    """
+    # The kit's own repository is excluded, and not as a convenience. There `.claude/` is a
+    # working copy of the delivery kept current by sync.sh, while the installed plugin is an
+    # older RELEASE, so the two differ permanently and by design. sync.sh --check is the
+    # mechanism there. A report that is always on is a report nobody reads.
+    if os.path.isfile(os.path.join(project_root, ".claude-plugin", "plugin.json")):
+        return 0
+    local_root = os.path.join(project_root, ".claude")
+    if not os.path.isdir(local_root):
+        return 3
+    adopted = read_adopted(local_root)
+    differing, skipped, compared = [], 0, 0
+    for d in SHADOW_DIRS:
+        base = os.path.join(kit_root, d)
+        if not os.path.isdir(base):
+            continue
+        for cur, _dirs, files in os.walk(base):
+            for name in files:
+                if name in ("hooks.json", ".DS_Store"):
+                    continue
+                rel = os.path.relpath(os.path.join(cur, name), kit_root)
+                mine = os.path.join(local_root, rel)
+                if not os.path.isfile(mine):
+                    continue
+                if rel in adopted:
+                    skipped += 1
+                    continue
+                compared += 1
+                if digest(mine) != digest(os.path.join(kit_root, rel)):
+                    differing.append(rel)
+    if not compared and not skipped:
+        return 3
+    if not differing:
+        return 0
+    sys.stdout.write(render_shadow(differing, skipped))
+    return 4
+
+
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else "."
+    argv = sys.argv[1:]
+    if "--shadow" in argv:
+        i = argv.index("--shadow")
+        kit_root = argv[0] if i > 0 else "."
+        project_root = argv[i + 1] if len(argv) > i + 1 else "."
+        return shadow(kit_root, project_root)
+    root = argv[0] if argv else "."
     entries = read_manifest(root)
     if entries is None:
         return 3

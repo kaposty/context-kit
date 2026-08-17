@@ -275,6 +275,96 @@ open(sys.argv[1],'w',encoding='utf-8').write('# L\n\n## TASK\n'+'ÄÖÜäöüß'
              || bad "lint counts bytes" "a German ledger trips the limit early"
 
 # ---------------------------------------------------------------------------
+echo "lint: the warning fires before the restore starts cutting, not after"
+# THE INVARIANT WAS WRITTEN DOWN WRONG, and the field paid for it. ledger-lint.sh says its
+# MAX_CHARS must equal the smallest restore budget, "any higher and this check goes green on
+# a ledger that the restore then clips". True as far as it goes, but the warning does not
+# fire at MAX_CHARS, it fires at MAX_CHARS plus the tolerance band, and the band was added
+# later without moving the number. Shipped defaults were 6000 and 15 percent, so the ledger
+# could sit at 6899 characters against a 6000 restore budget with nothing said.
+#
+# Measured across two dogfooded projects, 217 restores: 11 came back INCOMPLETE, and every
+# single one emitted between 6480 and 6593 bytes, that is inside the silent band
+# [`grep -c 'complete=0' .claude/log/session-ledger-hook.log`, which every install of this
+# kit can run on itself]. Canonical reasoning was dropped at exactly the moment it was
+# needed, and the one mechanism meant to prevent it reported nothing.
+#
+# So the real invariant is MAX_CHARS * (1 + TOLERANCE) <= smallest restore budget: a warning
+# that only fires once the loss has happened is too late to be one. Derived from the shipped
+# files rather than typed here, and the SHIPPED SNIPPET is checked too, because settings that
+# ride along in settings-snippet.json override the hook default on every real install.
+BAND_PROBLEMS="$(python3 - "$KIT" <<'PY'
+import os, re, sys
+kit = sys.argv[1]
+def num(path, pattern):
+    m = re.search(pattern, open(os.path.join(kit, path), encoding="utf-8").read(), re.M)
+    return int(m.group(1)) if m else None
+budget = num("hooks/session-start-prime.sh", r"^RESTORE_BUDGET=(\d+)")
+dflt_c = num("hooks/ledger-lint.sh",         r'MAX_CHARS="\$\{SESSION_LEDGER_MAX_CHARS:-(\d+)\}"')
+dflt_t = num("hooks/ledger-lint.sh",         r'TOLERANCE_PCT="\$\{SESSION_LEDGER_TOLERANCE_PCT:-(\d+)\}"')
+snip_c = num("settings-snippet.json",        r'"SESSION_LEDGER_MAX_CHARS":\s*"(\d+)"')
+snip_t = num("settings-snippet.json",        r'"SESSION_LEDGER_TOLERANCE_PCT":\s*"(\d+)"')
+# The example manifest is the third copy of these two numbers and was the one nobody looked
+# at: it still said 6000 after the hook and the snippet had been corrected. A number that is
+# written in three places and checked in two drifts in the third, every time.
+yml_c  = num("context-manifest.example.yaml", r"^  budget_chars: (\d+)\s+# budget_chars")
+yml_t  = num("context-manifest.example.yaml", r"^  tolerance_pct: (\d+)")
+bad = []
+for label, c, t in (("hook-default", dflt_c, dflt_t), ("shipped-snippet", snip_c, snip_t),
+                    ("example-manifest", yml_c, yml_t)):
+    if c is None or t is None:
+        bad.append("%s-unreadable" % label)          # a broken extractor must not read as a pass
+        continue
+    trip = c + c * t // 100
+    if budget is None:
+        bad.append("restore-budget-unreadable")
+    elif trip > budget:
+        bad.append("%s-warns-at-%d-but-the-restore-cuts-at-%d" % (label, trip, budget))
+print(",".join(bad) if bad else "OK:%s/%s+%s%%" % (budget, dflt_c, dflt_t))
+PY
+)"
+case "$BAND_PROBLEMS" in
+  OK:*) ok "the tolerance band ends below the restore budget ($BAND_PROBLEMS)" ;;
+  *)    bad "the warning fires after the restore already cut" "$BAND_PROBLEMS" ;;
+esac
+# And the same thing once more as behaviour, because the arithmetic above would stay green if
+# the renderer started cutting earlier than its budget for some other reason. A ledger sitting
+# exactly on the trip line must still render COMPLETE: the warning precedes the loss.
+LAB_BAND="$TMP/lab-band"; mkdir -p "$LAB_BAND"
+BAND_RC="$(python3 - "$KIT" "$LAB_BAND" <<'PY'
+import os, re, subprocess, sys
+kit, tmp = sys.argv[1], sys.argv[2]
+src = open(os.path.join(kit, "hooks/ledger-lint.sh"), encoding="utf-8").read()
+c = int(re.search(r'MAX_CHARS="\$\{SESSION_LEDGER_MAX_CHARS:-(\d+)\}"', src).group(1))
+t = int(re.search(r'TOLERANCE_PCT="\$\{SESSION_LEDGER_TOLERANCE_PCT:-(\d+)\}"', src).group(1))
+budget = int(re.search(r"^RESTORE_BUDGET=(\d+)", open(
+    os.path.join(kit, "hooks/session-start-prime.sh"), encoding="utf-8").read(), re.M).group(1))
+trip = c + c * t // 100
+# Seven canonical sections with real bullets, which is the shape the renderer is tuned for.
+# One giant TASK block would not exercise the priority order at all.
+names = ["TASK", "NEXT", "OPEN", "DECIDED", "VERIFIED", "DROPPED", "PLAN"]
+body = "# Session Ledger\n\n"
+i = 0
+while len(body) < trip:
+    body += "## %s\n" % names[i % 7]
+    for k in range(6):
+        body += "- entry %d in section %s carrying a sentence of reasoning\n" % (k, names[i % 7])
+    body += "\n"
+    i += 1
+    if i > 400: break
+path = os.path.join(tmp, "trip.md")
+open(path, "w", encoding="utf-8").write(body[:trip])
+rc = subprocess.run([sys.executable, os.path.join(kit, "hooks/ledger_render.py"), path, str(budget)],
+                    capture_output=True, text=True).returncode
+print("%s:%s" % (rc, len(body[:trip])))
+PY
+)"
+case "$BAND_RC" in
+  0:*) ok "a ledger on the trip line still restores complete (${BAND_RC#0:} characters)" ;;
+  *)   bad "the restore already cuts at the trip line" "renderer returned ${BAND_RC%%:*} at ${BAND_RC#*:} characters" ;;
+esac
+
+# ---------------------------------------------------------------------------
 echo "hooks: the size warning has a tolerance band, so nobody plays character golf"
 # Regression: with a hard limit and a warning on the first character over, a real session
 # rewrote entries and stripped markup to land at 4999 of 5000. It burned a turn and
@@ -394,13 +484,22 @@ except Exception:
     print(-1)
 ' "$2" 2>/dev/null || echo -1
 }
+# DISABLE_AUTO_COMPACT is pinned here, and that is not decoration. This measures the tax a
+# CORRECTLY configured project pays at every session start; the auto-compaction report is a
+# fault notice, budgeted separately below. Without the pin this run inherits the ambient
+# environment, which on the author's machine has the variable set and on CI does not, so the
+# same commit would be green locally and red on ubuntu for a reason nobody would look for.
 OUT="$(cd "$LAB7" && echo '{"source":"startup","session_id":"S1"}' \
-  | bash .claude/hooks/session-start-prime.sh 2>/dev/null)"
+  | DISABLE_AUTO_COMPACT=true bash .claude/hooks/session-start-prime.sh 2>/dev/null)"
 PROTO_LEN="$(_silent_json "$OUT" SessionStart)"
 [ "${PROTO_LEN:-0}" -gt 0 ] && ok "prime delivers a suppressed SessionStart result" \
                             || bad "prime output is not a suppressed JSON result" "the protocol lands in the transcript"
-{ [ "${PROTO_LEN:-0}" -gt 0 ] && [ "$PROTO_LEN" -le 700 ]; } \
-  && ok "the primed protocol stays under 700 characters ($PROTO_LEN)" \
+# 800, raised from 700 on 2026-08-17 and only for a fact the session cannot derive: the
+# checkpoint marker is per session, so its filename carries an id that only the harness
+# knows, and a marker nobody can name is a marker nobody writes. Everything else in this
+# block is still under the old figure. Raise it again only for something equally unavoidable.
+{ [ "${PROTO_LEN:-0}" -gt 0 ] && [ "$PROTO_LEN" -le 800 ]; } \
+  && ok "the primed protocol stays under 800 characters ($PROTO_LEN)" \
   || bad "primed protocol too fat or unreadable" "$PROTO_LEN characters at every session start"
 
 printf '# Session Ledger\n\n## TASK\nX\n\n## DROPPED\n- PATH-A dropped: "quoted" and \\ escaped\n' \
@@ -428,6 +527,80 @@ LINT_LEN="$(_silent_json "$OUT" Stop)"
 { [ "${LINT_LEN:-0}" -gt 0 ] && [ "$LINT_LEN" -le 600 ]; } \
   && ok "the lint warning stays under 600 characters ($LINT_LEN)" \
   || bad "lint text too long or unreadable" "$LINT_LEN characters of sermon"
+
+# ---------------------------------------------------------------------------
+echo "hooks: a session is told when auto-compaction can still fire"
+# The PreCompact guardrail is wired to the `manual` matcher [hooks/hooks.json], so an
+# AUTOMATIC compaction never reaches it: no checkpoint, no notice, and the reasoning goes
+# through the summariser unprepared. The whole kit assumes DISABLE_AUTO_COMPACT is set, a
+# plugin cannot ship an `env` block, and nothing told anyone when it was missing. Measured
+# on the author's own machine 2026-08-17: the global settings had no `env` block at all
+# while the kit had been assuming otherwise for three days.
+#
+# THE VALUE DECIDES, NOT THE PRESENCE. The harness accepts only 1/true/yes/on, lowercased
+# and trimmed [verified in the 2.1.220 binary: `function Yt(e){...return
+# ["1","true","yes","on"].includes(t)}` guarding `if(Yt(process.env.DISABLE_AUTO_COMPACT))
+# return!1`]. So `0`, `false`, `off` and a typo all leave auto-compaction ON while reading
+# to a human like the opposite. A check for "is it set" would go green on every one of them.
+#
+# The lab is hermetic on purpose: CLAUDE_CONFIG_DIR is pointed at an empty directory and
+# both variables are stripped, because this suite runs inside a session that sets
+# DISABLE_AUTO_COMPACT itself. Without that, every case here would inherit the answer.
+LAB_AC="$TMP/lab-autocompact"; mkdir -p "$LAB_AC/.claude/hooks" "$LAB_AC/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_AC/.claude/hooks/"
+printf '# L\n\n## TASK\nx\n' > "$LAB_AC/.claude/session-ledger.md"
+_ac_out() {   # args: zero or more VAR=VALUE -> raw hook output
+  (cd "$LAB_AC" && echo '{"source":"startup","session_id":"S1"}' \
+    | env -u DISABLE_AUTO_COMPACT -u DISABLE_COMPACT \
+          CLAUDE_CONFIG_DIR="$LAB_AC/cfg" SESSION_LEDGER_KIT_INTEGRITY=off "$@" \
+      bash .claude/hooks/session-start-prime.sh 2>/dev/null)
+}
+_ac() { case "$(_ac_out "$@")" in *"Auto-compaction is on"*) echo warn ;; *) echo silent ;; esac; }
+
+AC_PROBLEMS=""
+[ "$(_ac)" = warn ] || AC_PROBLEMS="$AC_PROBLEMS,silent-when-the-variable-is-missing"
+for v in 1 true yes on TRUE " On "; do
+  [ "$(_ac "DISABLE_AUTO_COMPACT=$v")" = silent ] \
+    || AC_PROBLEMS="$AC_PROBLEMS,warns-although-[$v]-really-disables-it"
+done
+for v in 0 false off no ture "" " "; do
+  [ "$(_ac "DISABLE_AUTO_COMPACT=$v")" = warn ] \
+    || AC_PROBLEMS="$AC_PROBLEMS,silent-although-[$v]-leaves-it-on"
+done
+[ -z "$AC_PROBLEMS" ] && ok "the report follows the value, not the presence of the variable" \
+  || bad "auto-compaction check misreads the value" "${AC_PROBLEMS#,}"
+
+# The other two doors. Warning against a state that somebody already closed by another route
+# is how a report earns its way into the ignored pile, and this one has exactly two: the
+# `autoCompactEnabled` setting (default true, so absence is NOT a closed door) and
+# DISABLE_COMPACT, which switches compaction off altogether and is read as plain truthiness.
+AC_DOORS=""
+printf '{"autoCompactEnabled": false}\n' > "$LAB_AC/.claude/settings.json"
+[ "$(_ac)" = silent ] || AC_DOORS="$AC_DOORS,false-alarm-against-the-settings-key"
+printf '{ "autoCompactEnabled" : true }\n' > "$LAB_AC/.claude/settings.json"
+[ "$(_ac)" = warn ] || AC_DOORS="$AC_DOORS,swallowed-by-a-settings-key-that-says-on"
+printf '{"permissions":{"allow":[]}}\n' > "$LAB_AC/.claude/settings.json"
+[ "$(_ac)" = warn ] || AC_DOORS="$AC_DOORS,absent-key-mistaken-for-a-closed-door"
+rm -f "$LAB_AC/.claude/settings.json"
+printf '{"autoCompactEnabled": false}\n' > "$LAB_AC/cfg/settings.json"
+[ "$(_ac)" = silent ] || AC_DOORS="$AC_DOORS,ignores-the-user-level-settings-file"
+rm -f "$LAB_AC/cfg/settings.json"
+[ "$(_ac "DISABLE_COMPACT=1")" = silent ] || AC_DOORS="$AC_DOORS,false-alarm-while-compaction-is-off-entirely"
+[ "$(_ac "SESSION_LEDGER_AUTOCOMPACT_CHECK=off")" = silent ] || AC_DOORS="$AC_DOORS,off-switch-does-not-switch-it-off"
+[ -z "$AC_DOORS" ] && ok "no alarm when another door already closed it, no silence when none did" \
+  || bad "auto-compaction check ignores the other two doors" "${AC_DOORS#,}"
+
+# A report nobody can act on is worse than none: it has to carry the key. The budget is the
+# second half, because this rides in the same 10000-character SessionStart result as the
+# restore, and a fault report that squeezes out the reasoning defeats its own purpose.
+AC_WARN="$(_ac_out)"
+AC_QUIET="$(_ac_out DISABLE_AUTO_COMPACT=true)"
+AC_DELTA=$(( ${#AC_WARN} - ${#AC_QUIET} ))
+AC_TEXT=""
+case "$AC_WARN" in *DISABLE_AUTO_COMPACT*) AC_TEXT="named" ;; esac
+{ [ "$AC_TEXT" = named ] && [ "$AC_DELTA" -gt 0 ] && [ "$AC_DELTA" -le 700 ]; } \
+  && ok "the report names the key it wants set and costs $AC_DELTA characters, only when it fires" \
+  || bad "auto-compaction report unusable or too fat" "key=${AC_TEXT:-missing} delta=$AC_DELTA characters"
 
 # ---------------------------------------------------------------------------
 echo "hooks: the checkpoint fires itself before the guardrail has to block"
@@ -622,9 +795,26 @@ for d, pat in (("hooks", r"\.(sh|py)$"), ("tools", r"\.sh$")):
             # writes, and that has to be ignorable. The list started at hooks/ alone and grew
             # when a hook first read a sibling SKILL.md and was reported as an unignored
             # runtime file.
-            if not any(m.startswith(".claude/%s/" % d)
-                       for d in ("hooks", "skills", "commands", "tools")):
-                paths.add(m.rstrip("/"))
+            # The trailing slash used to be required, so the bare directory `.claude/hooks`
+            # was read as runtime state and demanded a gitignore entry. Same four names,
+            # same reason, with or without it.
+            if any(m == ".claude/%s" % d or m.startswith(".claude/%s/" % d)
+                   for d in ("hooks", "skills", "commands", "tools")):
+                continue
+            # Configuration owned by whoever installs the kit, same category as the four
+            # directories above and exempt for the same reason: they version it themselves,
+            # and the README tells them to edit it BY HAND. No script here writes either
+            # file, they are only read (the auto-compaction check in session-start-prime.sh
+            # has to know whether `autoCompactEnabled` closed the door already). Named
+            # explicitly rather than covered by a pattern, so a hook that starts WRITING
+            # settings shows up as the different problem it would be.
+            # NO APOSTROPHE ANYWHERE IN THIS HEREDOC. It sits inside "$( ... )", and there a
+            # lone quote opens a string for the OUTER parser even inside a python comment and
+            # even in a heredoc quoted with 'PY'. The result is not an error at the quote: it
+            # is "unexpected EOF" pointing at a backtick a thousand lines further down.
+            if m in (".claude/settings.json", ".claude/settings.local.json"):
+                continue
+            paths.add(m.rstrip("/"))
 
 def covered(path, lines):
     for raw in lines:
@@ -632,6 +822,10 @@ def covered(path, lines):
         if not line or line.startswith("#"):
             continue
         if line.rstrip("/") == path or (line.endswith("/") and path.startswith(line)):
+            return True
+        # A trailing star, which is what a per-session file needs: the checkpoint marker
+        # carries a session id, so no literal line can ever name it.
+        if line.endswith("*") and path.startswith(line[:-1]):
             return True
     return False
 
@@ -741,6 +935,13 @@ for rel in sorted(f for f in os.listdir(kit) if f.endswith(".md")):
     if not os.path.exists(path):
         continue
     text = open(path, encoding="utf-8").read()
+    # A RELEASED CHANGELOG SECTION IS HISTORY AND IS LEFT ALONE. This check used to demand the
+    # current number everywhere, which forced the 1.0.0 entry to claim 74 assertions when that
+    # release shipped with 66. Enforcing consistency there costs correctness: a changelog whose
+    # job is to record what was true at a version is the one document that must NOT be swept
+    # forward. Only sections headed by a version number are skipped; "Unreleased" is not one,
+    # and neither is anything in the other documents.
+    text = re.split(r"^## \d+\.\d+\.\d+", text, maxsplit=1, flags=re.M)[0]
     # (?:\s|%20) because the README carries the number in a badge URL too, where the space is
     # percent-encoded. A hand-typed number no checker can see is exactly how a stale claim
     # survives a release, and the badge is the most-read number in the file.
@@ -1597,6 +1798,148 @@ INT_PROBLEMS="${INT_PROBLEMS#,}"
 [ -z "$INT_PROBLEMS" ] && INT_PROBLEMS="OK"
 [ "$INT_PROBLEMS" = "OK" ] && ok "drift is reported, adoption silences only what was adopted" \
                            || bad "the integrity check misjudges an installation" "$INT_PROBLEMS"
+
+# ---------------------------------------------------------------------------
+echo "guard: a marker from another session does not wave this one through"
+# MEASURED IN A REPOSITORY WITH FOUR CONCURRENT SESSIONS: `.claude/.checkpoint-ready` is ONE
+# file, and two sessions reported the same marker timestamp to the second because it WAS the
+# same file. The consequence is sharper than "indistinguishable": this guard tests FRESHNESS,
+# not AUTHORSHIP, and a foreign file brings freshness with it. A session that never
+# checkpointed was waved through the moment any other session set the marker. A missing marker
+# warns; a foreign one says nothing at all.
+#
+# The name is therefore derived from the session_id the hook already receives. The half that
+# was missing in the version this was taken from, and the reason that version left six stray
+# markers behind (four of them inside five minutes): the SKILL there says to write
+# `.checkpoint-ready.<your-session-id>` while nothing ever tells the model what its id is. So
+# both session-start hooks now name the exact path, which is checked below too.
+LAB_G="$TMP/labguard"; rm -rf "$LAB_G"; mkdir -p "$LAB_G/.claude/hooks"
+cp "$KIT/hooks/precompact-guard.sh" "$KIT/hooks/ledger_render.py" "$LAB_G/.claude/hooks/"
+printf '# L\n\n## TASK\nreal work\n\n## DECIDED\n- something with a reason\n' \
+  > "$LAB_G/.claude/session-ledger.md"
+_guard() {   # $1 = session id ("" for none) -> allow | block
+  OUT="$(cd "$LAB_G" && printf '{"trigger":"manual","session_id":"%s"}' "$1" \
+    | bash .claude/hooks/precompact-guard.sh 2>&1)"; RC=$?
+  [ "$RC" -eq 0 ] && echo allow || echo block
+}
+G_PROBLEMS=""
+# THE SHARED MARKER IS PRESENT THROUGHOUT, and that is the whole point of the setup: it is
+# what today's checkpoint writes, so a check that only ever sees the per-session file would
+# go green without ever meeting the defect. Session A checkpointed, session B did not.
+touch "$LAB_G/.claude/.checkpoint-ready" "$LAB_G/.claude/.checkpoint-ready.SESSION-A"
+sleep 1; touch "$LAB_G/.claude/session-ledger.md"   # work happened after the checkpoint
+[ "$(_guard SESSION-A)" = allow ] || G_PROBLEMS="$G_PROBLEMS,own-marker-rejected"
+[ "$(_guard SESSION-B)" = block ] || G_PROBLEMS="$G_PROBLEMS,foreign-marker-waved-a-session-through"
+# Without an id nothing can be attributed, and a guard that locks a session out of its own
+# window would be worse than the defect. It falls back to the shared marker, out loud.
+[ "$(_guard '')" = allow ] || G_PROBLEMS="$G_PROBLEMS,no-id-does-not-fall-back"
+# An id that could steer a path must never reach one. The right outcome is NOT a block: an
+# unusable id means "no id", which is the deliberate fail-open above. What must hold is that
+# nothing outside .claude/ is ever touched and no marker with that shape appears.
+CANARY_DIR="$LAB_G/outside"; mkdir -p "$CANARY_DIR"
+[ "$(_guard '../outside/pwned')" = allow ] || G_PROBLEMS="$G_PROBLEMS,a-hostile-id-does-not-fall-back"
+[ -z "$(ls -A "$CANARY_DIR" 2>/dev/null)" ] || G_PROBLEMS="$G_PROBLEMS,an-id-reached-a-path-outside-.claude"
+case "$(ls -A "$LAB_G/.claude" 2>/dev/null | tr '\n' ' ')" in
+  *pwned*) G_PROBLEMS="$G_PROBLEMS,a-hostile-id-became-a-filename" ;;
+esac
+# The block text has to carry the exact path INCLUDING the id, or the session sees a fresh
+# shared marker and cannot tell why it does not count.
+BLOCK_TXT="$(cd "$LAB_G" && printf '{"trigger":"manual","session_id":"SESSION-B"}' \
+  | bash .claude/hooks/precompact-guard.sh 2>&1)"
+case "$BLOCK_TXT" in *".checkpoint-ready.SESSION-B"*) ;; *) G_PROBLEMS="$G_PROBLEMS,block-text-hides-the-real-path" ;; esac
+[ -z "$G_PROBLEMS" ] && ok "the marker is per session, with a named fallback and no path injection" \
+  || bad "the guard still trusts a foreign marker" "${G_PROBLEMS#,}"
+
+# The other half: a per-session marker is unusable if the model is never told the name. Both
+# session-start hooks carry it, because prime covers startup and reinject covers everything
+# after a compaction, which is exactly when the earlier statement is gone.
+LAB_SN="$TMP/labsayname"; rm -rf "$LAB_SN"; mkdir -p "$LAB_SN/.claude/hooks"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/session-start-reinject.sh" \
+   "$KIT/hooks/ledger_render.py" "$LAB_SN/.claude/hooks/"
+printf '# L\n\n## TASK\nx\n' > "$LAB_SN/.claude/session-ledger.md"
+_says_marker() {   # $1 = hook, $2 = source -> yes | no
+  OUT="$(cd "$LAB_SN" && printf '{"source":"%s","session_id":"SID-42"}' "$2" \
+    | DISABLE_AUTO_COMPACT=true SESSION_LEDGER_KIT_INTEGRITY=off bash ".claude/hooks/$1" 2>/dev/null)"
+  case "$OUT" in *".checkpoint-ready.SID-42"*) echo yes ;; *) echo no ;; esac
+}
+SN_PROBLEMS=""
+[ "$(_says_marker session-start-prime.sh startup)" = yes ] || SN_PROBLEMS="$SN_PROBLEMS,prime-never-names-the-marker"
+[ "$(_says_marker session-start-reinject.sh compact)" = yes ] || SN_PROBLEMS="$SN_PROBLEMS,reinject-never-names-the-marker"
+[ -z "$SN_PROBLEMS" ] && ok "both session-start hooks name the marker path this session must write" \
+  || bad "the per-session marker is unwritable" "${SN_PROBLEMS#,}"
+
+# And the third half of a per-session file: something has to remove it again. Six were lying
+# around in the project this design came from, four written inside five minutes, because
+# nothing ever reaped one. The shared marker is exempt: it can carry the nothing-to-preserve
+# opt-out, which is a standing statement about the project and not about a session.
+REAP_PROBLEMS=""
+touch "$LAB_SN/.claude/.checkpoint-ready" \
+      "$LAB_SN/.claude/.checkpoint-ready.OLD-ONE" \
+      "$LAB_SN/.claude/.checkpoint-ready.SID-42"
+python3 -c "
+import os, sys, time
+old = time.time() - 40 * 86400
+for n in ('.checkpoint-ready', '.checkpoint-ready.OLD-ONE', '.checkpoint-ready.SID-42'):
+    os.utime(os.path.join(sys.argv[1], '.claude', n), (old, old))" "$LAB_SN"
+_says_marker session-start-prime.sh startup >/dev/null
+[ -e "$LAB_SN/.claude/.checkpoint-ready.OLD-ONE" ] && REAP_PROBLEMS="$REAP_PROBLEMS,a-stale-marker-is-never-removed"
+[ -e "$LAB_SN/.claude/.checkpoint-ready" ]        || REAP_PROBLEMS="$REAP_PROBLEMS,the-shared-marker-was-reaped-with-the-rest"
+[ -e "$LAB_SN/.claude/.checkpoint-ready.SID-42" ] || REAP_PROBLEMS="$REAP_PROBLEMS,a-session-reaped-its-own-marker"
+# A fresh one is not stale, and reaping by age alone would take it.
+touch "$LAB_SN/.claude/.checkpoint-ready.YOUNG-ONE"
+_says_marker session-start-prime.sh startup >/dev/null
+[ -e "$LAB_SN/.claude/.checkpoint-ready.YOUNG-ONE" ] || REAP_PROBLEMS="$REAP_PROBLEMS,a-live-marker-was-reaped"
+[ -z "$REAP_PROBLEMS" ] && ok "stale session markers are reaped, the shared one and the live ones are not" \
+  || bad "the per-session marker litters or reaps too much" "${REAP_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "integrity: a local copy that shadows the installed plugin is reported"
+# THE ONE MECHANISM AGAINST GOING STALE IS PART OF THE INSTALLATION, so it disappears first
+# with the installation that went stale. Measured in a real project on 2026-08-17: `.claude/`
+# held `skills/` and `tools/` with a `brief-digest.sh` from before a fix, but no `hooks/`,
+# so there was no kit_integrity.py to run at all. The plugin was current and did not help,
+# for two reasons that compound:
+#   1. the command files probe `.claude/tools` FIRST, so the old local file wins over the
+#      current plugin. A stale partial copy does not sit beside the plugin, it overrides it.
+#   2. the plugin cache carries its OWN .kit-manifest, so the checker running from there
+#      verifies itself, is always clean, and never looks at the copy that is actually running.
+# With a plugin installed there is a second reference point on the machine, which is exactly
+# what the manifest alone cannot be: the header of kit_integrity.py says it can answer "are my
+# files the ones that shipped" and not "am I up to date". Against the cache it can.
+LAB_SH="$TMP/labshadow"
+rm -rf "$LAB_SH"; mkdir -p "$LAB_SH/cache/tools" "$LAB_SH/cache/hooks" "$LAB_SH/proj/.claude/tools"
+printf 'current\n' > "$LAB_SH/cache/tools/brief-digest.sh"
+printf 'current\n' > "$LAB_SH/cache/hooks/ledger-lint.sh"
+cp "$KIT/hooks/kit_integrity.py" "$LAB_SH/cache/hooks/kit_integrity.py"
+_shadow() {   # -> "rc:<report first line>"
+  OUT="$(python3 "$LAB_SH/cache/hooks/kit_integrity.py" "$LAB_SH/cache" --shadow "$LAB_SH/proj" 2>/dev/null)"
+  printf '%s:%s' "$?" "$(printf '%s' "$OUT" | grep -c 'tools/brief-digest.sh')"
+}
+SH_PROBLEMS=""
+printf 'current\n' > "$LAB_SH/proj/.claude/tools/brief-digest.sh"
+[ "$(_shadow)" = "0:0" ] || SH_PROBLEMS="$SH_PROBLEMS,identical-copy-reported-as-drift[$(_shadow)]"
+printf 'stale\n' > "$LAB_SH/proj/.claude/tools/brief-digest.sh"
+[ "$(_shadow)" = "4:1" ] || SH_PROBLEMS="$SH_PROBLEMS,shadowing-copy-not-reported[$(_shadow)]"
+# A file that exists only in the cache is reached through the fallback and is not shadowing
+# anything, so it must not be reported: over-reporting is how this ends up ignored.
+[ -f "$LAB_SH/proj/.claude/hooks/ledger-lint.sh" ] && SH_PROBLEMS="$SH_PROBLEMS,lab-setup-wrong"
+case "$(python3 "$LAB_SH/cache/hooks/kit_integrity.py" "$LAB_SH/cache" --shadow "$LAB_SH/proj" 2>/dev/null)" in
+  *ledger-lint*) SH_PROBLEMS="$SH_PROBLEMS,reports-a-file-that-is-not-shadowing" ;;
+esac
+# Deliberate divergence stays deliberate, same escape hatch as the manifest check.
+printf 'tools/brief-digest.sh  # ours on purpose\n' > "$LAB_SH/proj/.claude/.kit-adopted"
+[ "$(_shadow)" = "0:0" ] || SH_PROBLEMS="$SH_PROBLEMS,adoption-does-not-silence-the-shadow-report"
+rm -f "$LAB_SH/proj/.claude/.kit-adopted"
+# The kit's own repository is the one place where `.claude/` being different from an older
+# released plugin is normal and permanent. sync.sh --check covers it there, so reporting it
+# every session start would be pure noise, and noise is what makes a real report unreadable.
+mkdir -p "$LAB_SH/proj/.claude-plugin"
+printf '{"name":"context-kit"}\n' > "$LAB_SH/proj/.claude-plugin/plugin.json"
+[ "$(_shadow)" = "0:0" ] || SH_PROBLEMS="$SH_PROBLEMS,reports-against-the-kit-repository-itself"
+rm -rf "$LAB_SH/proj/.claude-plugin"
+[ "$(_shadow)" = "4:1" ] || SH_PROBLEMS="$SH_PROBLEMS,guard-swallowed-the-real-case"
+[ -z "$SH_PROBLEMS" ] && ok "a shadowing copy is named, an identical or adopted one is not" \
+  || bad "the shadow check misjudges an installation" "${SH_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
 echo "integrity: a stale manifest is caught, and the recipe carries it to a foreign install"

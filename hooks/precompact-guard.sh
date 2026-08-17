@@ -30,7 +30,20 @@
 
 set -uo pipefail
 
-MARKER=".claude/.checkpoint-ready"
+# THE MARKER IS PER SESSION, and this used to be one shared file. Measured in a repository
+# with four concurrent sessions: two of them reported the same marker timestamp to the
+# second, because it WAS the same file. The consequence is sharper than "indistinguishable".
+# This guard tests FRESHNESS, not AUTHORSHIP, and a foreign file brings freshness with it, so
+# a session that had never checkpointed was waved through the moment any other session set the
+# marker. A missing marker warns; a foreign one said nothing at all.
+#
+# The name is derived from the session_id the hook already receives, so the session itself has
+# to know nothing to be JUDGED. It does have to know the name to WRITE it, and that half is
+# not optional: the version this was taken from told the model to write
+# `.checkpoint-ready.<your-session-id>` without ever telling it the value, and left six stray
+# markers behind, four of them inside five minutes. Both session-start hooks therefore name
+# the exact path, and the block text below repeats it.
+MARKER_SHARED=".claude/.checkpoint-ready"
 LEDGER=".claude/session-ledger.md"
 # WHERE THE RENDERER LIVES. Resolved next to this script first, with the classic install
 # path as fallback. The hardcoded ".claude/hooks/..." was a silent bottleneck: install the
@@ -64,13 +77,52 @@ if [ -n "$TRIGGER" ] && [ "$TRIGGER" != "manual" ]; then
   _allow "trigger=$TRIGGER, not manual"
 fi
 
-# No marker at all -> checkpoint never ran -> block.
+# Only a plain id may become part of a filename. Anything else is treated as no id at all,
+# which lands in the fail-open branch below rather than anywhere near a path.
+SID="$(printf '%s' "$STDIN_JSON" \
+  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+case "${SID:-}" in ''|*[!a-zA-Z0-9._-]*) SID="" ;; esac
+if [ -n "$SID" ]; then
+  MARKER=".claude/.checkpoint-ready.$SID"
+else
+  # FAIL-OPEN, as everywhere in this file: with no id there is nothing to attribute, so the
+  # shared marker still counts. The old defect survives in exactly this branch, deliberately.
+  # A guard that locks a session out of its own window is worse than the case it prevents.
+  MARKER="$MARKER_SHARED"
+  _log "no usable session_id, falling back to the shared marker"
+fi
+
+# THE ESCAPE HATCH HAS TO EXIST FOR REAL, and it is checked here, BEFORE the missing-marker
+# block below. The old block text offered `touch $MARKER`, and measured, that did not unblock
+# anything: the content check further down runs regardless of the marker, so a session with
+# genuinely nothing worth preserving stayed blocked, three touches in a row, with no working
+# way out named anywhere. With auto-compaction off there is no second route to a compaction
+# either, so the actual exit a user finds is disabling the hook. A guard whose documented
+# escape is a dead end trains people to remove the guard.
+#
+# It is read at the SHARED path too, and that is deliberate: the opt-out is a statement about
+# the PROJECT ("there is nothing here worth preserving"), not about one session, so it must
+# not have to be repeated by every session that opens the directory.
+if grep -qi 'nothing-to-preserve' "$MARKER_SHARED" 2>/dev/null; then
+  _allow "opt-out in shared marker (nothing-to-preserve)"
+fi
+
+# No marker for THIS session -> its checkpoint never ran -> block.
 if [ ! -e "$MARKER" ]; then
-  _log "BLOCK (no marker)"
+  _log "BLOCK (no marker for this session)"
+  FOREIGN_NOTE=""
+  if [ -n "$SID" ] && [ -e "$MARKER_SHARED" ]; then
+    # Without this sentence the change is a dead end: the session sees a fresh marker file
+    # sitting right there and cannot tell why it does not count.
+    FOREIGN_NOTE="A marker from another session is present, and it does not count for this one:
+freshness is not authorship, and trusting it once waved a session through that had
+never checkpointed at all.
+"
+  fi
   cat >&2 <<MSG
 Compaction stopped: no checkpoint has run in this session.
 
-Run /checkpoint, then /compact. It brings the ledger, the project state and memory
+${FOREIGN_NOTE}Run /checkpoint, then /compact. It brings the ledger, the project state and memory
 current, so today's reasoning survives the summary instead of only what happened.
 
 Nothing to preserve? echo nothing-to-preserve > $MARKER
@@ -78,13 +130,8 @@ MSG
   exit 2
 fi
 
-# THE ESCAPE HATCH HAS TO EXIST FOR REAL. The old block text offered `touch $MARKER`,
-# and measured, that did not unblock anything: the content check below runs regardless of
-# the marker, so a session with genuinely nothing worth preserving stayed blocked, three
-# touches in a row, with no working way out named anywhere. With auto-compaction off
-# there is no second route to a compaction either, so the actual exit a user finds is
-# disabling the hook. A guard whose documented escape is a dead end trains people to
-# remove the guard. The opt-out is now explicit and greppable in the marker file itself.
+# And once more at this session's own marker, for the session that wrote the opt-out into
+# the file the block text named. Reason and history are at the shared check above.
 if grep -qi 'nothing-to-preserve' "$MARKER" 2>/dev/null; then
   _allow "opt-out in marker (nothing-to-preserve)"
 fi

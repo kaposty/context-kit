@@ -30,7 +30,7 @@ worth more than a description of it.
 ## Before you open a pull request
 
 ```bash
-bash tests/run.sh            # 68 assertions, all green
+bash tests/run.sh            # 77 assertions, all green
 bash sync.sh --check         # delivery and installation identical, exit 0
 claude plugin validate .     # both manifests
 ```
@@ -38,6 +38,17 @@ claude plugin validate .     # both manifests
 CI runs the first two on Ubuntu and macOS. Both platforms matter for a real reason: `stat -f %m`
 is mtime on BSD and mount point on GNU, and that difference shipped a silent defect once.
 macOS still ships bash 3.2, so every delivered shell file has to parse under it.
+
+Add an assertion and the count in the documents goes stale, which the suite then reports. It
+lives in four files and several grammars, so change it in one command rather than by hand
+(`OLD` and `NEW` being the two numbers):
+
+```bash
+sed -i '' "s/OLD assertions/NEW assertions/g; s/OLD%20assertions/NEW%20assertions/g; s/OLD of OLD green/NEW of NEW green/g; s/One of the OLD is/One of the NEW is/g" CHANGELOG.md CONTRIBUTING.md GUIDE.md README.md
+```
+
+Drop the `''` after `-i` on GNU sed. Released sections of the changelog are history and are
+deliberately not swept forward: 1.0.0 shipped with 66 and still says so.
 
 ## Where to make the change
 

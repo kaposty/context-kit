@@ -199,11 +199,23 @@ on its own, because the guardrail checks recency, not content. The only legitima
 ledger is a session that truly had nothing worth carrying; if that is the case, say so
 explicitly rather than leaving it implied.
 
-Then **write the freshness marker** so the guardrail knows a checkpoint just ran:
+Then **write the freshness marker** so the guardrail knows a checkpoint just ran. **The
+marker is per session**, and the session-start block named the exact path: look for the line
+`Checkpoint marker for this session:` and write that file.
 
 ```bash
-mkdir -p .claude && touch .claude/.checkpoint-ready
+mkdir -p .claude && touch .claude/.checkpoint-ready.<the id from that line>
 ```
+
+If you genuinely cannot find the path (no session-start block in context and none in the
+transcript), write `.claude/.checkpoint-ready` instead and say so in the hand-off. That is
+the shared fallback the guardrail still honours; it is only worse in a directory where
+several sessions run at once, and there it is worse for a measured reason. A single shared
+file made the guardrail test freshness rather than authorship, so a session that had never
+checkpointed was waved through as soon as any other session set the marker.
+
+Do not invent an id, and do not reuse one from a restored ledger: it belongs to the session
+that wrote it, not to this one. A marker under a foreign id counts for nobody.
 
 This is the one side-effect the skill leaves on disk. A companion `PreCompact` guardrail
 hook blocks `/compact` unless this marker is fresh. The guardrail is idle-aware: if the
@@ -236,8 +248,11 @@ turn is missing this reasoning and the canary is absent, read `.claude/session-l
 
 This skill assumes **auto-compaction is OFF** (`env.DISABLE_AUTO_COMPACT: "true"`; the
 settings key `autoCompactEnabled` exists too and is the fallback, the environment variable
-wins over it), so compaction
-only ever happens when you run `/compact`, right after firing this. Turning the net off is
+wins over it, and only `1`, `true`, `yes` and `on` count as a yes, so `0` and `false` leave
+it running), so compaction
+only ever happens when you run `/compact`, right after firing this. Nothing has to be taken
+on trust here: `session-start-prime.sh` resolves the real state once per session and says so
+when auto-compaction is still on. Turning the net off is
 a real cost: a session that misses its cue runs into a full window with nothing to catch it,
 and this kit's own catch, the self-firing checkpoint in `ledger-lint.sh`, ships off. With auto off, the
 harness shows a compact affordance as the window fills (around 50%), your cue to run this

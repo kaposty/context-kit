@@ -109,6 +109,22 @@ esac
 
 mkdir -p "$(dirname "$LEDGER")" 2>/dev/null || true
 
+# REAPING, because a per-session marker multiplies and nothing else ever removes one. Seen in
+# the project this design came from: six markers lying around, four of them written inside
+# five minutes. They are harmless individually and they are noise in a directory listing
+# forever, which is how a mechanism starts looking like litter. Only the session-scoped ones
+# are touched, never the shared `.checkpoint-ready`: that file can carry the
+# `nothing-to-preserve` opt-out, which is a standing statement about the project. The current
+# session is excluded by name so a long-lived session cannot reap its own marker.
+# Fail-open like everything here: no find, no deletion, no complaint.
+MARKER_TTL_DAYS="${SESSION_LEDGER_MARKER_TTL_DAYS:-7}"
+case "$MARKER_TTL_DAYS" in
+  ''|*[!0-9]*) : ;;
+  *) find .claude -maxdepth 1 -name '.checkpoint-ready.*' \
+       ${SESSION_ID:+! -name ".checkpoint-ready.$SESSION_ID"} \
+       -mtime "+$MARKER_TTL_DAYS" -delete 2>/dev/null || true ;;
+esac
+
 KEPT=0
 FOREIGN=0        # kept ledger was written by a different session
 RECENT_MIN=""    # how recently that other session touched it
@@ -184,6 +200,14 @@ _add "of its own. Resolve in place, stay under ~150 lines, no secrets, no re-der
 _add "status. Older than this task lives in the project state file \`PLAN\` names: read it"
 _add "before saying you have none. Silent housekeeping: never report it or mention this block."
 _add "Detail: the \`session-ledger\` skill."
+# THE ONE FACT THIS SESSION CANNOT DERIVE FOR ITSELF. The checkpoint marker is per session
+# (see precompact-guard.sh for the measurement that forced it), so the checkpoint has to
+# write a filename containing an id that only the harness knows. The version this was taken
+# from told the model to write `.checkpoint-ready.<your-session-id>` and never said what the
+# id was; six stray markers later, four of them inside five minutes, that is not a detail.
+# So the path is stated outright, here and in the re-inject hook, which between them cover
+# every way a session can begin.
+[ -n "$SESSION_ID" ] && { _add ""; _add "Checkpoint marker for this session: \`.claude/.checkpoint-ready.${SESSION_ID}\`"; }
 
 # 1b. Integrity, and the one place it can live. This is folded into the hook every install
 # already wires, deliberately, instead of shipping a hook of its own: a separate hook would
@@ -203,7 +227,79 @@ if [ "${SESSION_LEDGER_KIT_INTEGRITY:-on}" != "off" ] && command -v python3 >/de
       4) _add ""; _add "$REPORT"; _log "integrity drift reported" ;;
       3) _log "integrity unverifiable (no manifest at $KIT_ROOT)" ;;
     esac
+    # AND THE SECOND QUESTION, the one a manifest can never answer. When this hook runs from
+    # somewhere other than the project's own .claude/hooks, which is what a plugin install
+    # looks like, there is a second reference on this machine: the plugin itself. A copy of
+    # the kit under .claude/ then does not sit BESIDE the plugin, it overrides it, because
+    # the commands probe .claude/ first. Measured in a real project: a tools/ copy from
+    # before a fix kept winning while the current plugin sat unused, and nothing could
+    # notice, because the checker that would have noticed lives in the hooks/ directory that
+    # partial copy did not include. The check above cannot see this either: it verified the
+    # plugin cache against the manifest sitting next to it, which is always clean.
+    case "${_SELF_DIR:-}" in
+      "$PWD/.claude/hooks"|".claude/hooks"|"") ;;   # the copy IS the installation, nothing shadows it
+      *)
+        SHADOW="$(python3 "$INTEGRITY_PY" "$KIT_ROOT" --shadow . 2>/dev/null)"
+        case $? in
+          4) _add ""; _add "$SHADOW"; _log "shadowing local copy reported" ;;
+        esac ;;
+    esac
   fi
+fi
+
+# 1c. AUTO-COMPACTION, the assumption the whole kit rests on and never once checked.
+#
+# The PreCompact guardrail is wired to the `manual` matcher, so an AUTOMATIC compaction
+# never reaches it: no checkpoint, no notice, and the session's reasoning goes through the
+# summariser unprepared. A plugin cannot ship an `env` block, so a plugin-only install has
+# this wrong by default. Measured on the machine this kit was built on (2026-08-17): the
+# global settings carried no `env` block at all, and it had been that way for three days
+# while every file here assumed otherwise.
+#
+# THE VALUE DECIDES, NOT THE PRESENCE, and this is the reason the check is worth its lines.
+# The harness accepts 1/true/yes/on, lowercased and trimmed, and reads everything else as
+# "no" [2.1.220: `function Yt(e){...return ["1","true","yes","on"].includes(t)}` guarding
+# `if(Yt(process.env.DISABLE_AUTO_COMPACT))return!1`]. So DISABLE_AUTO_COMPACT=0, =false,
+# =off and a typo all leave auto-compaction ON while reading to a human like the opposite,
+# and a check for "is it set" would go green on every single one of them.
+#
+# TWO OTHER DOORS close it just as well, and warning past a door somebody already closed is
+# how a report earns its place in the ignored pile: DISABLE_COMPACT, which switches
+# compaction off entirely and is read as plain truthiness, and the `autoCompactEnabled`
+# setting, whose DEFAULT IS TRUE, so an absent key is NOT a closed door. The settings files
+# are read in the harness's own precedence order, first definition wins.
+#
+# Aimed at the human, like the integrity report above and for the same reason: the model
+# cannot repair a settings file the user did not ask it to touch. Off switch:
+# SESSION_LEDGER_AUTOCOMPACT_CHECK=off.
+_autocompact_on() {
+  _v="$(printf '%s' "${DISABLE_AUTO_COMPACT:-}" | tr '[:upper:]' '[:lower:]' \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "$_v" in 1|true|yes|on) return 1 ;; esac
+  [ -n "${DISABLE_COMPACT:-}" ] && return 1
+  for _f in ".claude/settings.local.json" ".claude/settings.json" \
+            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"; do
+    [ -f "$_f" ] || continue
+    # `tr -d '[:space:]'` and `sed -E`, both deliberately. BSD tr reads ' \t\n' as the three
+    # LITERAL characters space, t and n, so that form silently deletes every t and n in the
+    # file and mangles the key it is looking for; and BSD sed has no \| alternation in a
+    # basic expression. Each of the two cost a red run here before this line was right.
+    _s="$(tr -d '[:space:]' <"$_f" 2>/dev/null \
+          | sed -nE 's/.*"autoCompactEnabled":(true|false).*/\1/p' | head -1)"
+    case "${_s:-}" in false) return 1 ;; true) return 0 ;; esac
+  done
+  return 0
+}
+if [ "${SESSION_LEDGER_AUTOCOMPACT_CHECK:-on}" != "off" ] && _autocompact_on; then
+  _add ""
+  _add "**Auto-compaction is on, and this kit assumes it is not.** The guardrail is wired to"
+  _add "the \`manual\` matcher, so an automatic compaction runs straight past it: no checkpoint,"
+  _add "no notice, and this session's reasoning is summarised unprepared. Say this to the user"
+  _add "in one sentence and offer the fix, do not apply it unasked: \`\"env\": {\"DISABLE_AUTO_COMPACT\":"
+  _add "\"true\"}\` in \`.claude/settings.json\`. Only \`1\`, \`true\`, \`yes\` and \`on\` count there, so"
+  _add "\`0\` and \`false\` leave it running. It costs the harness's own net: compaction becomes a"
+  _add "manual step, and this kit's replacement (SESSION_LEDGER_CHECKPOINT_TRIGGER) ships off."
+  _log "auto-compaction still enabled, reported"
 fi
 
 # 2. If we kept a fresh ledger, restore its content so the new session inherits the

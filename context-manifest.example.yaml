@@ -68,11 +68,15 @@ always_on:
 ledger:
   path: .claude/session-ledger.md
   archive_dir: .claude/session-ledger.archive
-  budget_chars: 6000          # = the SMALLEST restore budget (prime), not the largest.
-                              # The re-inject body gets 6550, prime gets 6000, the harness
-                              # hook cap is 10000 (measured worst case at 6000: 8595, so
-                              # ~1400 headroom). Advertising anything above the smallest
-                              # makes "within budget" a false assurance.
+  budget_chars: 5200          # budget_chars * (1 + tolerance_pct/100) must stay UNDER the
+                              # smallest restore budget, because the warning fires at the
+                              # top of the band, not at this number. 5200 + 15% = 5980,
+                              # just under the 6000 the prime hook restores (the re-inject
+                              # body gets 6550, the harness hook cap is 10000, measured
+                              # worst case 8595). It said 6000 here for a while, which put
+                              # the real line at 6899: over 217 restores in two dogfooded
+                              # projects, 11 came back INCOMPLETE and every one of them was
+                              # inside that silent stretch.
   tolerance_pct: 15           # the lint warns past budget + tolerance, never on the exact
                               # number: a hard line made a real session shave markup to
                               # land at 4999, which is golf against a counter, not curation
