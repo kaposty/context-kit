@@ -1128,32 +1128,165 @@ echo "tools: the instructions locate the scripts instead of guessing at them"
 # the file, then the real call. Three tool calls and a permission prompt for one report. A
 # guessed path is a defect of the instruction, not of the reader, so the shipped line resolves
 # the install itself and this checks that it does, in a layout where only one of them exists.
+#
+# WHY THIS EXECUTES THE LINE INSTEAD OF GREPPING FOR IT. The previous version demanded the
+# substring CLAUDE_PLUGIN_ROOT in all three files and then ran the line in two layouts, both
+# of which exist only inside this checkout. Both halves were wrong at once. That variable is
+# substituted for HOOK commands; it is empty in a Bash call the model makes, so the plugin
+# branch of the line could never resolve, and the assertion pinned the defect in place rather
+# than catching it. Measured in a foreign project on 2026-08-15 and again on 2026-08-16: the
+# line picked the project's own tools/ and the call exited 127, both times, and the model
+# rescued itself by hand with the cache path. So the line is now taken out of each shipped
+# file and executed, in four layouts. Two of them are the ones that were failing in the field:
+# `plugin` is what a stranger gets, and `partial` is half a copy.
 RESOLVE_PROBLEMS=""
+# A cache that looks like the real one. CLAUDE_CONFIG_DIR points the shipped line at it, the
+# same lever the degradation check further down uses.
+PLUGCFG="$TMP/resolve-plugincache"
+PLUGTOOLS="$PLUGCFG/plugins/cache/context-kit/context-kit/1.0.0/tools"
+mkdir -p "$PLUGTOOLS"
+printf 'echo REACHED\n' > "$PLUGTOOLS/brief-digest.sh"
+printf 'echo REACHED\n' > "$PLUGTOOLS/effect-probe.sh"
+EMPTYCFG="$TMP/resolve-nocache"; mkdir -p "$EMPTYCFG"
 for f in skills/brief/SKILL.md commands/brief.md commands/prove.md; do
-  grep -q 'CLAUDE_PLUGIN_ROOT' "$KIT/$f" || RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$f-does-not-resolve"
+  case "$f" in
+    *prove*) SCRIPT="effect-probe.sh"; OTHER="brief-digest.sh"; TAIL='; bash "$P"' ;;
+    *)       SCRIPT="brief-digest.sh"; OTHER="effect-probe.sh"; TAIL='' ;;
+  esac
   # A bare relative call is what sent the model down the wrong path in the first place.
   grep -qE 'bash (tools|\.claude/tools)/(brief-digest|effect-probe)\.sh' "$KIT/$f" \
     && RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$f-still-names-a-bare-path"
-done
-RESOLVER="$(grep -h -o 'ls -d \.claude/tools tools "\${CLAUDE_PLUGIN_ROOT:-/nonexistent}/tools" 2>/dev/null | head -1' "$KIT/skills/brief/SKILL.md" | head -1)"
-[ -n "$RESOLVER" ] || RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,resolver-line-not-found"
-if [ -n "$RESOLVER" ]; then
-  for layout in standalone delivery; do
-    LAB="$TMP/resolve-$layout"
+  # Matched by shape, not by wording, so a rewrite of the line does not silently stop being
+  # tested: an assignment or a loop, on one line, naming the script.
+  LINE="$(grep -h -m1 -E "^[[:space:]]*.?(T=|P=|for d in).*$SCRIPT" "$KIT/$f" \
+          | sed -e 's/^[[:space:]]*//' -e 's/^`//' -e 's/`$//' -e 's/\$ARGUMENTS//')"
+  if [ -z "$LINE" ]; then
+    RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$f-has-no-resolver-line"
+    continue
+  fi
+  for layout in standalone delivery plugin partial; do
+    LAB="$TMP/resolve-$(printf '%s' "$f" | tr '/.' '--')-$layout"; rm -rf "$LAB"; mkdir -p "$LAB"
+    CFG="$EMPTYCFG"
     case "$layout" in
-      standalone) mkdir -p "$LAB/.claude/tools"; echo 'echo REACHED' > "$LAB/.claude/tools/brief-digest.sh" ;;
-      delivery)   mkdir -p "$LAB/tools";         echo 'echo REACHED' > "$LAB/tools/brief-digest.sh" ;;
+      standalone) mkdir -p "$LAB/.claude/tools"; printf 'echo REACHED\n' > "$LAB/.claude/tools/$SCRIPT" ;;
+      delivery)   mkdir -p "$LAB/tools";         printf 'echo REACHED\n' > "$LAB/tools/$SCRIPT" ;;
+      # What a stranger gets: nothing of the kit in the project, the kit in a plugin cache, and
+      # a tools/ directory that belongs to the project. This is the measured failure.
+      plugin)     mkdir -p "$LAB/tools"; printf 'x = 1\n' > "$LAB/tools/unrelated.py"; CFG="$PLUGCFG" ;;
+      # Half a copy: .claude/tools exists and holds the OTHER script. Also measured, in the
+      # same project, after someone copied one file by hand to make the line work once.
+      partial)    mkdir -p "$LAB/.claude/tools"; printf 'echo WRONG\n' > "$LAB/.claude/tools/$OTHER"; CFG="$PLUGCFG" ;;
     esac
-    # Separated by ";" and not by "&&" on purpose: `ls` reports a non zero status for the
-    # operands that do not exist, and under `set -o pipefail` that status is the pipeline's.
-    # Chaining on it would test this suite's shell options rather than the shipped line.
-    GOT="$(cd "$LAB"; T="$(eval "$RESOLVER")"; bash "$T/brief-digest.sh" 2>/dev/null)"
-    [ "$GOT" = "REACHED" ] || RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$layout-not-resolved"
+    # Separated by ";" and not by "&&" on purpose: a resolver that probes for paths reports a
+    # non zero status for the ones that do not exist, and under `set -o pipefail` that status
+    # is the pipeline's. Chaining on it would test this suite's shell options, not the line.
+    GOT="$(cd "$LAB"; CLAUDE_CONFIG_DIR="$CFG"; export CLAUDE_CONFIG_DIR; eval "$LINE$TAIL" 2>/dev/null)"
+    [ "$GOT" = "REACHED" ] || RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$f-$layout-not-resolved"
   done
-fi
+done
 [ -z "$RESOLVE_PROBLEMS" ] && RESOLVE_PROBLEMS="OK"
 [ "$RESOLVE_PROBLEMS" = "OK" ] && ok "the documented line finds the scripts on every install path" \
                                || bad "an instruction still guesses where the tools live" "$RESOLVE_PROBLEMS"
+
+# ---------------------------------------------------------------------------
+echo "settings: no denial of a key that exists, and the switch names its cost"
+# Two separate defects lived in the same sentence, in the files that teach the method.
+# (1) Three places said `autoCompactEnabled` is not a real key and is silently ignored.
+# Measured with `strings` on the installed binary: the schema carries it as an optional
+# boolean, and the resolution is `if (DISABLE_AUTO_COMPACT) return false; return
+# autoCompactEnabled ?? true`. The recommendation was right, the reason was invented, and an
+# invented reason is what a reader repeats.
+# (2) The kit asks you to switch off the harness's own net for a full window and used to say
+# nothing about what that costs, while its own replacement net ships off. A switch whose
+# downside is undocumented is a trap for the person who trusts the document.
+AC_PROBLEMS=""
+# Self-probe first. A grep that errors out prints nothing and reads exactly like a clean
+# result, so both patterns are fired at a sentence they MUST match before they are trusted
+# on real files. Not hypothetical: the first version of the second pattern used a repetition
+# of 1200, which BSD grep refuses past 255, and the check went green while measuring nothing.
+printf 'the autoCompactEnabled key does not exist in the schema' \
+  | grep -qiE "autoCompactEnabled.{0,140}(does not exist|is not a real|not a real settings key|silently ignored)" \
+  || AC_PROBLEMS="$AC_PROBLEMS,denial-pattern-does-not-match-a-known-denial"
+printf 'a session that misses its cue runs into the wall' \
+  | grep -qiE "runs into (a|the) (wall|full window)|net removed|no substitute" \
+  || AC_PROBLEMS="$AC_PROBLEMS,cost-pattern-does-not-match-a-known-cost-sentence"
+for f in settings-snippet.json skills/checkpoint/SKILL.md skills/session-ledger/SKILL.md \
+         commands/checkpoint.md README.md GUIDE.md CLAUDE.example.md; do
+  [ -f "$KIT/$f" ] || continue
+  # Newlines folded, because in settings-snippet.json the claim is split across two array
+  # entries and a line-wise grep walks straight past it.
+  BLOB="$(tr '\n' ' ' < "$KIT/$f")"
+  printf '%s' "$BLOB" \
+    | grep -qiE "autoCompactEnabled.{0,140}(does not exist|is not a real|not a real settings key|silently ignored)" \
+    && AC_PROBLEMS="$AC_PROBLEMS,$f-denies-a-key-that-exists"
+  case "$f" in
+    settings-snippet.json|skills/checkpoint/SKILL.md)
+      printf '%s' "$BLOB" | grep -q "DISABLE_AUTO_COMPACT" || continue
+      # Presence in the file, not proximity to the switch: BSD grep caps a repetition at 255,
+      # so the window that would express "near it" cannot be written portably. Found that the
+      # honest way, by writing `.{0,1200}` first and watching grep error out into a green.
+      printf '%s' "$BLOB" \
+        | grep -qiE "runs into (a|the) (wall|full window)|net removed|no substitute" \
+        || AC_PROBLEMS="$AC_PROBLEMS,$f-recommends-the-switch-without-its-cost" ;;
+  esac
+done
+[ -z "$AC_PROBLEMS" ] && AC_PROBLEMS="OK"
+[ "$AC_PROBLEMS" = "OK" ] && ok "auto-compaction is described as it actually resolves" \
+                          || bad "the kit states something about settings that is not true" "$AC_PROBLEMS"
+
+# ---------------------------------------------------------------------------
+echo "install: the printed blocks warn, install and uninstall when actually run"
+# The install block used to be five `cp -R` lines, which overwrite a file of the same name
+# without a word, and the names this kit claims are brief, checkpoint, prove and
+# session-ledger. Nothing in README or GUIDE mentioned collisions, backups or removal.
+# This runs the blocks as printed, in a project that owns one of those names, because a
+# documented command that nobody executes is exactly the class of defect being fixed here.
+# It also caught two real ones on the first run: `cp -R hooks/.` carried hooks.json, which
+# belongs to the plugin wiring, and the uninstall then left it behind.
+INST_PROBLEMS=""
+_readme_block() {  # first fenced bash block whose body matches $1
+  awk -v pat="$1" 'BEGIN{RS="```"} /^bash/ && $0 ~ pat {print substr($0,6); exit}' "$KIT/README.md"
+}
+CHECK_B="$(_readme_block 'WOULD OVERWRITE'          | sed "s|KIT=path/to/context-kit|KIT=$KIT|")"
+INST_B="$( _readme_block 'kit-manifest .claude/'    | sed "s|KIT=path/to/context-kit|KIT=$KIT|")"
+UNINST_B="$(_readme_block 'ledger-lint-state'       | sed "s|KIT=path/to/context-kit|KIT=$KIT|")"
+for pair in "collision-check:$CHECK_B" "install:$INST_B" "uninstall:$UNINST_B"; do
+  [ -n "${pair#*:}" ] || INST_PROBLEMS="$INST_PROBLEMS,${pair%%:*}-block-not-in-readme"
+done
+if [ -n "$CHECK_B" ] && [ -n "$INST_B" ] && [ -n "$UNINST_B" ]; then
+  # A project that already owns one of the names the kit claims.
+  LABA="$TMP/install-collide"; rm -rf "$LABA"; mkdir -p "$LABA/.claude/commands"
+  printf 'mine\n' > "$LABA/.claude/commands/brief.md"
+  WARN="$(cd "$LABA" && KIT="$KIT" bash -c "$CHECK_B" 2>&1)"
+  printf '%s' "$WARN" | grep -q 'commands/brief.md' \
+    || INST_PROBLEMS="$INST_PROBLEMS,check-does-not-name-the-collision"
+
+  # A project with no collision: install, then uninstall, and see what survives either way.
+  LABB="$TMP/install-clean"; rm -rf "$LABB"; mkdir -p "$LABB/.claude/hooks"
+  printf 'mine\n' > "$LABB/.claude/hooks/my-own.sh"
+  QUIET="$(cd "$LABB" && KIT="$KIT" bash -c "$CHECK_B" 2>&1)"
+  [ -z "$QUIET" ] || INST_PROBLEMS="$INST_PROBLEMS,check-warns-about-nothing"
+  ( cd "$LABB" && KIT="$KIT" bash -c "$INST_B" ) >/dev/null 2>&1
+  [ -f "$LABB/.claude/hooks/ledger-lint.sh" ]  || INST_PROBLEMS="$INST_PROBLEMS,install-left-out-a-hook"
+  [ -f "$LABB/.claude/tools/brief-digest.sh" ] || INST_PROBLEMS="$INST_PROBLEMS,install-left-out-a-tool"
+  [ -f "$LABB/.claude/.kit-manifest" ]         || INST_PROBLEMS="$INST_PROBLEMS,install-left-out-the-manifest"
+  [ -x "$LABB/.claude/hooks/ledger-lint.sh" ]  || INST_PROBLEMS="$INST_PROBLEMS,install-did-not-set-the-mode"
+  # hooks.json is the plugin wiring and has no meaning in a standalone install.
+  [ -f "$LABB/.claude/hooks/hooks.json" ]      && INST_PROBLEMS="$INST_PROBLEMS,install-copied-the-plugin-wiring"
+  # The mode glob would have caught this file too.
+  [ -x "$LABB/.claude/hooks/my-own.sh" ]       && INST_PROBLEMS="$INST_PROBLEMS,install-chmodded-a-foreign-script"
+  if command -v python3 >/dev/null 2>&1; then
+    ( cd "$LABB" && python3 .claude/hooks/kit_integrity.py .claude >/dev/null 2>&1 )
+    [ $? -eq 0 ] || INST_PROBLEMS="$INST_PROBLEMS,fresh-install-does-not-match-its-own-manifest"
+  fi
+  ( cd "$LABB" && KIT="$KIT" bash -c "$UNINST_B" ) >/dev/null 2>&1
+  LEFT="$(cd "$LABB" && find .claude -type f | sed 's|^\./||' | grep -v 'my-own.sh' || true)"
+  [ -z "$LEFT" ] || INST_PROBLEMS="$INST_PROBLEMS,uninstall-left-$(printf '%s' "$LEFT" | tr '\n' '+' | tr -d ' ')"
+  [ -f "$LABB/.claude/hooks/my-own.sh" ] || INST_PROBLEMS="$INST_PROBLEMS,uninstall-removed-a-foreign-file"
+fi
+[ -z "$INST_PROBLEMS" ] && INST_PROBLEMS="OK"
+[ "$INST_PROBLEMS" = "OK" ] && ok "install and uninstall do what the README says they do" \
+                            || bad "the documented install is not what actually happens" "$INST_PROBLEMS"
 
 # ---------------------------------------------------------------------------
 echo "brief: without python3 it says so, instead of reporting a quiet nothing"
@@ -1367,13 +1500,32 @@ echo "install: the standalone recipe copies every directory a command reaches in
 # day they shipped. And nothing told the reader that skill and command directories are read
 # at startup, so a fresh install looks broken until /reload-skills runs. A recipe is only
 # right if following it literally produces a working install.
-INSTALL_PROBLEMS="$(python3 - "$KIT" <<'PY'
+#
+# It used to read the recipe and look for `mkdir .claude/<dir>` and `cp -R <dir>/.`, which
+# tied the check to one wording: rewriting the recipe into a derived file list broke the
+# assertion while the recipe itself got better. So it now RUNS the block and looks at the
+# directories that exist afterwards. Same question, no opinion about how it is written.
+# Matched positively, on a token the block must contain, and not by testing the variable for
+# emptiness: an extractor that breaks returns nothing, and "nothing" must not be the shape
+# that passes. Same rule the meta check at the end of this file enforces.
+RECIPE_B="$(_readme_block 'kit-manifest .claude/' | sed "s|KIT=path/to/context-kit|KIT=$KIT|")"
+case "$RECIPE_B" in
+  *.kit-manifest*) HAVE_RECIPE=yes ;;
+  *)               HAVE_RECIPE=no ;;
+esac
+if [ "$HAVE_RECIPE" = "no" ]; then
+  INSTALL_PROBLEMS="recipe-block-not-in-readme"
+else
+  LABR="$TMP/recipe-lab"; rm -rf "$LABR"; mkdir -p "$LABR"
+  ( cd "$LABR" && KIT="$KIT" bash -c "$RECIPE_B" ) >/dev/null 2>&1
+  INSTALL_PROBLEMS="$(python3 - "$KIT" "$LABR" <<'PY'
 import os, re, sys
-kit = sys.argv[1]
+kit, lab = sys.argv[1], sys.argv[2]
 readme = open(os.path.join(kit, "README.md"), encoding="utf-8").read()
 bad = []
-# Every .claude/<dir>/ a delivered command or skill reaches into has to be created AND filled
-# by the standalone recipe, or the recipe hands the reader a broken install.
+# Every .claude/<dir> a delivered command or skill reaches into has to exist AND hold files
+# after the recipe ran, or the recipe hands the reader a broken install. The trailing class
+# is deliberately wide: a path can appear as .claude/tools/x, "\.claude/tools" or bare.
 wanted = set()
 for sub in ("commands", "skills"):
     base = os.path.join(kit, sub)
@@ -1382,17 +1534,19 @@ for sub in ("commands", "skills"):
             if not f.endswith(".md"):
                 continue
             text = open(os.path.join(root, f), encoding="utf-8").read()
-            wanted |= set(re.findall(r'\.claude/([a-z][a-z0-9-]*)/', text))
+            wanted |= set(re.findall(r'\.claude/([a-z][a-z0-9-]*)(?:[/"\s]|$)', text))
 for d in sorted(wanted):
-    if not re.search(r'mkdir[^\n]*\.claude/%s\b' % d, readme):
+    p = os.path.join(lab, ".claude", d)
+    if not os.path.isdir(p):
         bad.append("recipe-never-creates:%s" % d)
-    if not re.search(r'cp -R [^\n]*%s/\.' % d, readme):
-        bad.append("recipe-never-copies:%s" % d)
+    elif not os.listdir(p):
+        bad.append("recipe-never-fills:%s" % d)
 if "/reload-skills" not in readme:
     bad.append("recipe-never-says-how-to-load-the-commands")
 print(",".join(sorted(set(bad))) if bad else "OK")
 PY
 )"
+fi
 [ "$INSTALL_PROBLEMS" = "OK" ] && ok "following the standalone recipe literally yields a working install" \
                               || bad "the standalone recipe is incomplete" "$INSTALL_PROBLEMS"
 

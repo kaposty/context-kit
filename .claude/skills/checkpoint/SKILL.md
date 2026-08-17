@@ -234,9 +234,12 @@ turn is missing this reasoning and the canary is absent, read `.claude/session-l
 
 ## Relationship to the guardrail and to auto-compaction
 
-This skill assumes **auto-compaction is OFF** (`env.DISABLE_AUTO_COMPACT: "true"`; note
-`autoCompactEnabled` is not a real settings key and is silently ignored), so compaction
-only ever happens when you run `/compact`, right after firing this. With auto off, the
+This skill assumes **auto-compaction is OFF** (`env.DISABLE_AUTO_COMPACT: "true"`; the
+settings key `autoCompactEnabled` exists too and is the fallback, the environment variable
+wins over it), so compaction
+only ever happens when you run `/compact`, right after firing this. Turning the net off is
+a real cost: a session that misses its cue runs into a full window with nothing to catch it,
+and this kit's own catch, the self-firing checkpoint in `ledger-lint.sh`, ships off. With auto off, the
 harness shows a compact affordance as the window fills (around 50%), your cue to run this
 skill then `/compact`. The `PreCompact` guardrail (`precompact-guard.sh`) holds that
 order: it blocks `/compact` when no checkpoint has run, and also when a marker sits over

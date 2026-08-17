@@ -9,8 +9,13 @@ neither proves that a path this session abandoned stays abandoned after a compac
 Work these steps and report honestly, including a red result.
 
 First resolve the install once, so no step has to guess where the script lives:
-`P=$(ls -d .claude/tools tools "${CLAUDE_PLUGIN_ROOT:-/nonexistent}/tools" 2>/dev/null | head -1)/effect-probe.sh`
-Every `$P` below is that path.
+
+```bash
+for d in .claude/tools tools "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools; do [ -f "$d/effect-probe.sh" ] && { P="$d/effect-probe.sh"; break; }; done
+```
+
+Every `$P` below is that path. If the loop leaves `$P` empty, the kit is not installed where
+you are standing: say so and stop, rather than guessing a path.
 
 1. **Plant.** Run `bash "$P" plant`. It writes one entry into `DROPPED` and one into
    `VERIFIED`, each carrying a random token that no model could produce by inference, and it

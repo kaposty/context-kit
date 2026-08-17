@@ -41,13 +41,17 @@ on screen, and it dies when you have read it. That is why it stores nothing.
 Run the digest, from the project root, exactly like this:
 
 ```bash
-T=$(ls -d .claude/tools tools "${CLAUDE_PLUGIN_ROOT:-/nonexistent}/tools" 2>/dev/null | head -1); bash "$T/brief-digest.sh"
+for d in .claude/tools tools "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools; do [ -f "$d/brief-digest.sh" ] && { bash "$d/brief-digest.sh"; break; }; done
 ```
 
 The line resolves the install itself, which is the point of writing it out. Naming one path
 and the other as an aside makes the model guess, and a guess is a failed call, a second call
 to look for the file, and a third to finally run it. Measured: exactly that, three tool calls
-and a wrong-path error, on a standalone install. An argument goes after the script name and
+and a wrong-path error, on a standalone install. It tests for the FILE and not for the
+directory, because a project that keeps its own `tools/` or half a copy under
+`.claude/tools/` otherwise wins the lookup and the call dies with exit 127: measured twice in
+a real project, days apart. `CLAUDE_CONFIG_DIR` and not `CLAUDE_PLUGIN_ROOT`, because the
+latter is substituted for hook commands only and is empty in a call you make. An argument goes after the script name and
 overrides the window: `24h`, `90m`, `3d`, or a date. It prints facts only, capped at a character budget, and
 it names what it had to cut. Pass that on rather than hiding it.
 

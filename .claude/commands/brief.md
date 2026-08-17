@@ -6,7 +6,9 @@ argument-hint: "[24h | 90m | 3d | a date]"
 Run the brief skill now. Report only. Write no file, commit nothing, fix nothing.
 
 1. **Facts.** Run exactly this, it resolves the install itself instead of making you guess:
-   `T=$(ls -d .claude/tools tools "${CLAUDE_PLUGIN_ROOT:-/nonexistent}/tools" 2>/dev/null | head -1); bash "$T/brief-digest.sh" $ARGUMENTS`
+   ```bash
+   for d in .claude/tools tools "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools; do [ -f "$d/brief-digest.sh" ] && { bash "$d/brief-digest.sh" $ARGUMENTS; break; }; done
+   ```
    With no argument the window is everything since the last
    run of this command, taken from the transcript. Repeat any `CUT FOR SPACE` or `INCOMPLETE`
    note in the briefing instead of hiding it.
