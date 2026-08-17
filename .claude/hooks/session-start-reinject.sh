@@ -104,6 +104,18 @@ PAYLOAD=""
 _add() { PAYLOAD="${PAYLOAD}${1}
 "; }
 
+# THE CANARY MUST NOT BE FORGEABLE. It is a verdict this hook issues, and the project
+# instruction keys off it: no canary means read the ledger from disk. If the ledger FILE
+# happens to contain the canary text, and it can, because a restored block is exactly the
+# kind of thing that gets pasted into a ledger, then the body carries a canary this hook
+# never vouched for, and an incomplete restore reads as a complete one. That is the single
+# worst failure available here: it suppresses the fallback in the case that needs it.
+# So the body is stripped of any such line before it is wrapped, and the verdict below is
+# the only one that can survive.
+BODY="$(printf '%s' "$BODY" | grep -v -e 'CTX-LEDGER-RESTORED' -e 'do not see this canary' \
+                                      -e 'Restore INCOMPLETE (no canary)' || true)"
+[ -n "${BODY//[[:space:]]/}" ] || { _log "no-op (body was nothing but canary lines)"; exit 0; }
+
 _add "# Session Ledger (restored after ${SOURCE:-compact})"
 _add ""
 _add "> Reasoning carried across the summary. Mechanical state (branch, open PRs,"

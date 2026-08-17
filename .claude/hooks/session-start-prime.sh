@@ -145,7 +145,10 @@ _mtime() {
 if [ -s "$LEDGER" ]; then
   # ALWAYS keep. The only question left is whether it belongs to this session.
   KEPT=1
-  OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1)"
+  # ONLY THE FIRST TOKEN IS THE ID. A stamp may carry a human-readable suffix
+  # (`_session: <uuid> (Manager, Desktop)_`), and comparing the whole line declared the
+  # rightful owner foreign: 55 characters against 36, measured.
+  OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1 | awk '{print $1}')"
   if [ -n "$SESSION_ID" ] && [ -n "$OWNER" ] && [ "$OWNER" != "$SESSION_ID" ]; then
     FOREIGN=1
     MTIME="$(_mtime "$LEDGER")"
@@ -364,7 +367,11 @@ if [ "$KEPT" -eq 1 ]; then
       _add '```'
       _add ""
       _add "Never append new reasoning to the ledger of a different task: mixed ledgers restore"
-      _add "the wrong decisions after a compaction. If it IS the same task, just continue."
+      _add "the wrong decisions after a compaction. If it IS the same task, continue AND take"
+      _add "the ledger over: set its \`_session:\` line to this session's id, given above. The"
+      _add "stamp is written once at seeding and refreshed by nobody, so leaving it stale keeps"
+      _add "this ledger looking foreign to every later session, and the size check refuses to"
+      _add "trim a ledger it believes belongs to someone else."
       if [ -n "$RECENT_MIN" ] && [ "$RECENT_MIN" -lt 10 ]; then
         _add ""
         _add "_It was touched very recently, so another session may be running in this same"

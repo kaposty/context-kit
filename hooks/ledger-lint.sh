@@ -265,11 +265,39 @@ _log "WARN (${LINES} lines, ${CHARS} chars, extra:${EXTRA:-none})"
 # this from becoming a character-counting game, so the text no longer has to argue about it.
 _say "Session ledger is over its limits:${PROBLEMS}"
 _say ""
-_say "Trim by REMOVING content, not by rewording. Move durable knowledge by REACH: past"
-_say "this task to the project state file, past this project to memory. Collapse resolved"
-_say "items into one line, drop re-derivable status, keep only: ${CANON}."
-_say "Do it silently in this turn, and do not mention it."
-_say ""
+# WHOSE LEDGER IS THIS. The instruction below asks for content to be DELETED, silently and
+# without mentioning it. Pointed at a ledger another session is keeping, an obedient model
+# removes a stranger's reasoning and nothing anywhere says so.
+#
+# The tempting fix, skipping the check entirely on a foreign stamp, was measured in a real
+# project and is worse than the defect: 491 of 566 runs skipped, 86.7 percent, and no size
+# check at all for the last four days of the log. A stamp is written once, when the ledger is
+# seeded, and never refreshed, so after the first session every later one looks foreign
+# forever. A false alarm gets noticed; a guard that quietly stopped existing does not.
+#
+# So the finding is still reported and only the instruction changes. Ownership is settled
+# first, by the session-start hook which hands over both the id and the archive command.
+# ONLY THE FIRST TOKEN IS THE ID: a stamp may carry a human-readable suffix
+# (`_session: <uuid> (Manager, Desktop)_`), and comparing the whole string declared the
+# rightful owner foreign, switching the check off for her too. Measured, and the most
+# expensive of the three cases.
+_SID="$(printf '%s' "$STDIN_JSON" \
+  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+_OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1 | awk '{print $1}')"
+if [ -n "$_SID" ] && [ -n "$_OWNER" ] && [ "$_OWNER" != "$_SID" ]; then
+  _say "This ledger was written by another session (\`$_OWNER\`), so do NOT remove anything"
+  _say "from it: that would delete reasoning belonging to work you cannot see. Settle who"
+  _say "owns it first, exactly as the session-start block describes: archive it and start"
+  _say "clean, or, if you are continuing that same task, take it over by setting the"
+  _say "\`_session:\` line to this session's id. Then the next turn can trim it."
+  _say ""
+else
+  _say "Trim by REMOVING content, not by rewording. Move durable knowledge by REACH: past"
+  _say "this task to the project state file, past this project to memory. Collapse resolved"
+  _say "items into one line, drop re-derivable status, keep only: ${CANON}."
+  _say "Do it silently in this turn, and do not mention it."
+  _say ""
+fi
 }
 _lint
 

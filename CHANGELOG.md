@@ -73,11 +73,27 @@ touched. Two entries correct a premise rather than a line of code, and they say 
   (`SESSION_LEDGER_MARKER_TTL_DAYS`). Without an id nothing can be attributed, so the shared
   marker still counts: a guardrail that locks a session out of its own window would be worse
   than the case it prevents.
+- **The size warning told a session to delete another session's reasoning.** It asks for content
+  to be REMOVED, silently and without mentioning it, and it had no notion of who a ledger
+  belongs to. The obvious fix is worse than the defect, and that is measured too: a version that
+  simply skipped the check on a foreign stamp ran 566 times in a real project and skipped 491 of
+  them, 86.7 percent, then stopped checking entirely for the last four days of its log, because
+  a stamp is written once at seeding and refreshed by nobody. So the finding is still reported
+  and only the instruction changes: settle ownership first, take the ledger over by updating the
+  `_session:` line, then trim. The session-start hook hands over both the id and the archive
+  command. Only the first token of the stamp is compared, because a human-readable suffix
+  otherwise declares the rightful owner foreign, which is the same silent failure again.
+- **The canary was forgeable.** It is a verdict the re-inject hook issues, and the project
+  instruction keys off it: no canary means read the ledger from disk. A restored block is
+  exactly the kind of text that gets pasted into a ledger, and once it was there the body
+  carried a canary nobody had vouched for, so an INCOMPLETE restore read as a complete one and
+  suppressed the fallback in the case that needs it. The body is now stripped of canary lines
+  before it is wrapped, and a body that was nothing but canary lines is a no-op.
 - **The assertion count check forced the changelog to falsify its own history**, demanding the
   current number in the 1.0.0 entry, which shipped with 66. Released sections are history and
   are no longer swept forward.
-- Twelve more assertions, 77 in total, each one seen red against the version that still carried
-  the defect before it was kept. Two of the twelve caught defects in the fix itself: BSD `tr`
+- Fourteen more assertions, 79 in total, each one seen red against the version that still carried
+  the defect before it was kept. Two of the fourteen caught defects in the fix itself: BSD `tr`
   reads `' \t\n'` as three literal characters and deletes every `t` and `n` in the file, and
   BSD `sed` has no `\|` in a basic expression.
 
