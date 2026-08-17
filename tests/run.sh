@@ -1900,16 +1900,28 @@ _guard() {   # $1 = session id ("" for none) -> allow | block
   [ "$RC" -eq 0 ] && echo allow || echo block
 }
 G_PROBLEMS=""
-# THE SHARED MARKER IS PRESENT THROUGHOUT, and that is the whole point of the setup: it is
-# what today's checkpoint writes, so a check that only ever sees the per-session file would
-# go green without ever meeting the defect. Session A checkpointed, session B did not.
-touch "$LAB_G/.claude/.checkpoint-ready" "$LAB_G/.claude/.checkpoint-ready.SESSION-A"
+# THE CASE THE AUTHORSHIP RULE IS FOR: session A checkpointed, session B did not, and no
+# shared marker exists because an updated checkpoint writes only the per-session path.
+touch "$LAB_G/.claude/.checkpoint-ready.SESSION-A"
 sleep 1; touch "$LAB_G/.claude/session-ledger.md"   # work happened after the checkpoint
 [ "$(_guard SESSION-A)" = allow ] || G_PROBLEMS="$G_PROBLEMS,own-marker-rejected"
 [ "$(_guard SESSION-B)" = block ] || G_PROBLEMS="$G_PROBLEMS,foreign-marker-waved-a-session-through"
+# AND THE CASE THAT COST A REGRESSION WITHIN THE HOUR. A checkpoint that wrote the SHARED
+# path, which is what every session already in flight does and what a project with its own
+# adopted checkpoint command keeps doing, must still pass. Refusing a session that did
+# everything right is worse than the defect above: that is how a guard gets switched off.
+touch "$LAB_G/.claude/.checkpoint-ready"
+sleep 1; touch "$LAB_G/.claude/session-ledger.md"
+[ "$(_guard SESSION-B)" = allow ] || G_PROBLEMS="$G_PROBLEMS,a-checkpoint-that-wrote-the-shared-path-is-refused"
+[ "$(_guard SESSION-A)" = allow ] || G_PROBLEMS="$G_PROBLEMS,own-marker-rejected-with-a-shared-one-present"
 # Without an id nothing can be attributed, and a guard that locks a session out of its own
 # window would be worse than the defect. It falls back to the shared marker, out loud.
 [ "$(_guard '')" = allow ] || G_PROBLEMS="$G_PROBLEMS,no-id-does-not-fall-back"
+# Neither marker: that is the only state that means no checkpoint ran.
+rm -f "$LAB_G/.claude/.checkpoint-ready" "$LAB_G/.claude/.checkpoint-ready.SESSION-A"
+[ "$(_guard SESSION-A)" = block ] || G_PROBLEMS="$G_PROBLEMS,no-marker-at-all-is-waved-through"
+touch "$LAB_G/.claude/.checkpoint-ready" "$LAB_G/.claude/.checkpoint-ready.SESSION-A"
+sleep 1; touch "$LAB_G/.claude/session-ledger.md"
 # An id that could steer a path must never reach one. The right outcome is NOT a block: an
 # unusable id means "no id", which is the deliberate fail-open above. What must hold is that
 # nothing outside .claude/ is ever touched and no marker with that shape appears.
@@ -1919,10 +1931,12 @@ CANARY_DIR="$LAB_G/outside"; mkdir -p "$CANARY_DIR"
 case "$(ls -A "$LAB_G/.claude" 2>/dev/null | tr '\n' ' ')" in
   *pwned*) G_PROBLEMS="$G_PROBLEMS,a-hostile-id-became-a-filename" ;;
 esac
-# The block text has to carry the exact path INCLUDING the id, or the session sees a fresh
-# shared marker and cannot tell why it does not count.
+# The block text has to carry the exact path INCLUDING the id, or the session cannot tell
+# which file it is supposed to have written.
+rm -f "$LAB_G/.claude/.checkpoint-ready"
 BLOCK_TXT="$(cd "$LAB_G" && printf '{"trigger":"manual","session_id":"SESSION-B"}' \
   | bash .claude/hooks/precompact-guard.sh 2>&1)"
+touch "$LAB_G/.claude/.checkpoint-ready"
 case "$BLOCK_TXT" in *".checkpoint-ready.SESSION-B"*) ;; *) G_PROBLEMS="$G_PROBLEMS,block-text-hides-the-real-path" ;; esac
 [ -z "$G_PROBLEMS" ] && ok "the marker is per session, with a named fallback and no path injection" \
   || bad "the guard still trusts a foreign marker" "${G_PROBLEMS#,}"
@@ -1960,8 +1974,19 @@ for n in ('.checkpoint-ready', '.checkpoint-ready.OLD-ONE', '.checkpoint-ready.S
     os.utime(os.path.join(sys.argv[1], '.claude', n), (old, old))" "$LAB_SN"
 _says_marker session-start-prime.sh startup >/dev/null
 [ -e "$LAB_SN/.claude/.checkpoint-ready.OLD-ONE" ] && REAP_PROBLEMS="$REAP_PROBLEMS,a-stale-marker-is-never-removed"
-[ -e "$LAB_SN/.claude/.checkpoint-ready" ]        || REAP_PROBLEMS="$REAP_PROBLEMS,the-shared-marker-was-reaped-with-the-rest"
 [ -e "$LAB_SN/.claude/.checkpoint-ready.SID-42" ] || REAP_PROBLEMS="$REAP_PROBLEMS,a-session-reaped-its-own-marker"
+# The empty shared marker is reaped with them, and that is what finally lets the authorship
+# rule take effect: while it exists the guardrail falls back to it. A NON-EMPTY one carries
+# the nothing-to-preserve opt-out and no clock gets to revoke that.
+[ -e "$LAB_SN/.claude/.checkpoint-ready" ] && REAP_PROBLEMS="$REAP_PROBLEMS,the-empty-shared-marker-keeps-the-back-door-open"
+printf 'nothing-to-preserve\n' > "$LAB_SN/.claude/.checkpoint-ready"
+python3 -c "
+import os, sys, time
+old = time.time() - 40 * 86400
+os.utime(os.path.join(sys.argv[1], '.claude', '.checkpoint-ready'), (old, old))" "$LAB_SN"
+_says_marker session-start-prime.sh startup >/dev/null
+[ -e "$LAB_SN/.claude/.checkpoint-ready" ] || REAP_PROBLEMS="$REAP_PROBLEMS,the-opt-out-was-reaped"
+rm -f "$LAB_SN/.claude/.checkpoint-ready"
 # A fresh one is not stale, and reaping by age alone would take it.
 touch "$LAB_SN/.claude/.checkpoint-ready.YOUNG-ONE"
 _says_marker session-start-prime.sh startup >/dev/null

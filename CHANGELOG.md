@@ -73,6 +73,16 @@ touched. Two entries correct a premise rather than a line of code, and they say 
   (`SESSION_LEDGER_MARKER_TTL_DAYS`). Without an id nothing can be attributed, so the shared
   marker still counts: a guardrail that locks a session out of its own window would be worse
   than the case it prevents.
+  **The shared marker is a fallback, not a competitor**, and that distinction was learned the
+  hard way within an hour of the first attempt: treating its presence as "some other session
+  checkpointed" refused two sessions that had just run the checkpoint and been told they were
+  safe to compact. Every session already in flight when the hooks are updated writes the
+  shared path, as does every project with its own adopted checkpoint command. Blocking work
+  that was done correctly is worse than the defect being fixed, because that is how a
+  guardrail gets switched off. So it is judged by its own marker when one exists, by the
+  shared one when none does, and refused only when neither is there. The rule then arrives on
+  its own: updated checkpoints write only the per-session path, the empty shared marker is
+  reaped with the rest after the TTL, and the fallback finds nothing to fall back to.
 - **The size warning told a session to delete another session's reasoning.** It asks for content
   to be REMOVED, silently and without mentioning it, and it had no notion of who a ledger
   belongs to. The obvious fix is worse than the defect, and that is measured too: a version that

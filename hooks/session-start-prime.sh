@@ -122,6 +122,13 @@ case "$MARKER_TTL_DAYS" in
   ''|*[!0-9]*) : ;;
   *) find .claude -maxdepth 1 -name '.checkpoint-ready.*' \
        ${SESSION_ID:+! -name ".checkpoint-ready.$SESSION_ID"} \
+       -mtime "+$MARKER_TTL_DAYS" -delete 2>/dev/null || true
+     # The shared marker goes the same way, and only then does the authorship rule actually
+     # arrive: while it exists the guardrail falls back to it, which is what keeps sessions
+     # already in flight working. EMPTY ONLY. A non-empty one carries the
+     # `nothing-to-preserve` opt-out, a standing statement about the project that no clock
+     # gets to revoke.
+     find .claude -maxdepth 1 -name '.checkpoint-ready' -empty \
        -mtime "+$MARKER_TTL_DAYS" -delete 2>/dev/null || true ;;
 esac
 

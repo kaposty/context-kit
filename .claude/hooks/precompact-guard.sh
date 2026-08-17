@@ -107,7 +107,27 @@ if grep -qi 'nothing-to-preserve' "$MARKER_SHARED" 2>/dev/null; then
   _allow "opt-out in shared marker (nothing-to-preserve)"
 fi
 
-# No marker for THIS session -> its checkpoint never ran -> block.
+# NO PER-SESSION MARKER IS NOT THE SAME AS NO CHECKPOINT, and treating it as such was a
+# regression measured within an hour of shipping it: two sessions ran the checkpoint, got
+# "Safe to run /compact now", and were then refused, because their checkpoint had written the
+# SHARED path. That happens for every session already in flight when the hooks are updated,
+# and for every project that has adopted its own checkpoint command. Blocking correct work is
+# worse than the defect this file is trying to fix: a guard that refuses a session which did
+# everything right is a guard people switch off, which is stated three paragraphs down as the
+# reason the escape hatch exists at all.
+#
+# So the shared marker is a FALLBACK rather than a competitor. Judged by its own marker when
+# it exists, by the shared one when it does not, and blocked only when neither is there. The
+# authorship rule then arrives on its own: once checkpoints write only the per-session path,
+# no shared marker gets created, the fallback finds nothing, and a session that never
+# checkpointed is refused. The age and idle checks below still apply to whichever file wins,
+# so a stale shared marker does not wave anybody through either.
+if [ ! -e "$MARKER" ] && [ -e "$MARKER_SHARED" ]; then
+  _log "no marker for this session, falling back to the shared one"
+  MARKER="$MARKER_SHARED"
+fi
+
+# Neither marker -> no checkpoint ran -> block.
 if [ ! -e "$MARKER" ]; then
   _log "BLOCK (no marker for this session)"
   FOREIGN_NOTE=""
