@@ -257,6 +257,51 @@ if [ "${SESSION_LEDGER_KIT_INTEGRITY:-on}" != "off" ] && command -v python3 >/de
   fi
 fi
 
+# 1b-bis. THE SAME KIT WIRED TWICE, which makes every hook fire twice.
+#
+# Measured in this kit's own repository on 2026-08-17, straight out of the hook log: four
+# events carry an identical line twice, in the same second. A plugin brings its own wiring in
+# hooks/hooks.json, a project can wire the same scripts again in .claude/settings.json, and
+# the harness honours both without a word. The cost is not cosmetic. The restore is placed in
+# the context TWICE, so a 6076 byte block becomes 12152 against a budget of 6000, and the
+# budget that exists to protect the window is bypassed by a factor of two while every log
+# line still reads healthy. That is the failure mode this kit is built against: a mechanism
+# that looks like it is working.
+#
+# REPORTED, NOT SUPPRESSED, and that is a decision rather than laziness. Suppressing the
+# second firing means one instance deciding that the other already ran, and a wrong decision
+# there silently drops the restore, which is exactly the loss the kit exists to prevent. The
+# wiring is a human choice in a human's file, so this names it and stops.
+#
+# Only the instance running from OUTSIDE the project can see both sides: it knows it is the
+# plugin, and it can read the project's settings. The plain standalone install is one wiring
+# in .claude/settings.json pointing at .claude/hooks, which is the shape the README teaches,
+# and a false alarm there would fire for most users and teach them to ignore the report.
+if [ "${SESSION_LEDGER_DOUBLE_WIRE_CHECK:-on}" != "off" ] && [ ! -f ".claude-plugin/plugin.json" ]; then
+  case "${_SELF_DIR:-}" in
+    "$PWD/.claude/hooks"|".claude/hooks"|"") ;;   # one wiring, and it is this one
+    *)
+      _DOUBLE=""
+      for _f in ".claude/settings.json" ".claude/settings.local.json" \
+                "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"; do
+        [ -f "$_f" ] || continue
+        grep -q 'session-start-prime\.sh' "$_f" 2>/dev/null && _DOUBLE="$_DOUBLE \`$_f\`"
+      done
+      if [ -n "$_DOUBLE" ]; then
+        _add ""
+        _add "**This kit is wired twice, so every hook here runs twice.** The plugin wires it, and"
+        _add "so does$_DOUBLE. Both fire. This block is in the context twice right now, which is"
+        _add "double the window the restore budget is supposed to cap, and the hook log shows two"
+        _add "identical lines per event. Say this to the user in one sentence and offer the fix, do"
+        _add "not apply it unasked: keep ONE of the two. Remove the kit's SessionStart, PreCompact,"
+        _add "Stop and UserPromptSubmit entries from that settings file to keep the plugin, or"
+        _add "disable the plugin to keep the local copy. Nothing else in the kit can undo this: it"
+        _add "is a wiring decision in a human's file."
+        _log "double wiring reported:$_DOUBLE"
+      fi ;;
+  esac
+fi
+
 # 1c. AUTO-COMPACTION, the assumption the whole kit rests on and never once checked.
 #
 # The PreCompact guardrail is wired to the `manual` matcher, so an AUTOMATIC compaction

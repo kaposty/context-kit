@@ -2066,6 +2066,70 @@ rm -rf "$LAB_SH/proj/.claude-plugin"
   || bad "the shadow check misjudges an installation" "${SH_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
+echo "integrity: the kit wired twice fires twice, and says so"
+# MEASURED IN THIS REPOSITORY ON 2026-08-17, in the hook log: four events carry an identical
+# line twice, in the same second. The cause is two wirings of the same scripts, the plugin
+# through hooks/hooks.json and the project through .claude/settings.json, and the harness
+# honours both. The cost is not cosmetic: the restore is placed in the context TWICE, so a
+# 6076 byte block becomes 12152 against a budget of 6000, and the budget that is supposed to
+# protect the window is bypassed by a factor of two while every log line still reads healthy.
+#
+# Detection rather than suppression, deliberately. Suppressing the second firing means one
+# instance deciding the other already ran, and a wrong decision there silently drops the
+# restore, which is the failure this kit exists to prevent. The wiring is a human decision
+# and only a human can unpick it, so the check names it and stops.
+LAB_DW="$TMP/lab-doublewire"
+rm -rf "$LAB_DW"; mkdir -p "$LAB_DW/cache/hooks" "$LAB_DW/proj/.claude/hooks" "$LAB_DW/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_DW/cache/hooks/"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_DW/proj/.claude/hooks/"
+printf '# L\n\n## TASK\nx\n' > "$LAB_DW/proj/.claude/session-ledger.md"
+WIRED='{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"bash .claude/hooks/session-start-prime.sh"}]}]}}'
+_dw() {   # args: <hook to run: cache|local> then zero or more VAR=VALUE -> warn | silent
+  _WHICH="$1"; shift
+  case "$_WHICH" in
+    cache) _SCRIPT="$LAB_DW/cache/hooks/session-start-prime.sh" ;;
+    *)     _SCRIPT="$LAB_DW/proj/.claude/hooks/session-start-prime.sh" ;;
+  esac
+  _O="$(cd "$LAB_DW/proj" && echo '{"source":"startup","session_id":"S1"}' \
+        | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_DW/cfg" \
+              SESSION_LEDGER_KIT_INTEGRITY=off "$@" bash "$_SCRIPT" 2>/dev/null)"
+  case "$_O" in *"wired twice"*) echo warn ;; *) echo silent ;; esac
+}
+DW_PROBLEMS=""
+# The real case: a plugin install on a project that also wires the same scripts itself.
+printf '%s\n' "$WIRED" > "$LAB_DW/proj/.claude/settings.json"
+[ "$(_dw cache)" = warn ] || DW_PROBLEMS="$DW_PROBLEMS,the-measured-double-wiring-is-not-reported"
+# settings.local.json is the same wiring in the file people are told to keep private.
+mv "$LAB_DW/proj/.claude/settings.json" "$LAB_DW/proj/.claude/settings.local.json"
+[ "$(_dw cache)" = warn ] || DW_PROBLEMS="$DW_PROBLEMS,blind-to-the-local-settings-file"
+mv "$LAB_DW/proj/.claude/settings.local.json" "$LAB_DW/proj/.claude/settings.json"
+# A user-level wiring is worse, not better: it doubles every project on the machine.
+mv "$LAB_DW/proj/.claude/settings.json" "$LAB_DW/cfg/settings.json"
+[ "$(_dw cache)" = warn ] || DW_PROBLEMS="$DW_PROBLEMS,blind-to-the-user-level-wiring"
+mv "$LAB_DW/cfg/settings.json" "$LAB_DW/proj/.claude/settings.json"
+# THE FALSE ALARM THAT WOULD HURT MOST: a plain standalone install is exactly one wiring in
+# .claude/settings.json pointing at .claude/hooks, and it is the shape the README teaches.
+# Warning there would fire for the majority of users and teach them to ignore the report.
+[ "$(_dw local)" = silent ] || DW_PROBLEMS="$DW_PROBLEMS,false-alarm-on-a-plain-standalone-install"
+# A plugin install with no second wiring is the other correct shape.
+rm -f "$LAB_DW/proj/.claude/settings.json"
+[ "$(_dw cache)" = silent ] || DW_PROBLEMS="$DW_PROBLEMS,false-alarm-on-a-plain-plugin-install"
+# Settings that mention something else entirely must not trip it.
+printf '{"permissions":{"allow":["Bash(ls:*)"]}}\n' > "$LAB_DW/proj/.claude/settings.json"
+[ "$(_dw cache)" = silent ] || DW_PROBLEMS="$DW_PROBLEMS,any-settings-file-mistaken-for-a-wiring"
+printf '%s\n' "$WIRED" > "$LAB_DW/proj/.claude/settings.json"
+# The kit repository is the one place where both wirings are deliberate and permanent.
+mkdir -p "$LAB_DW/proj/.claude-plugin"
+printf '{"name":"context-kit"}\n' > "$LAB_DW/proj/.claude-plugin/plugin.json"
+[ "$(_dw cache)" = silent ] || DW_PROBLEMS="$DW_PROBLEMS,reports-against-the-kit-repository-itself"
+rm -rf "$LAB_DW/proj/.claude-plugin"
+[ "$(_dw cache)" = warn ] || DW_PROBLEMS="$DW_PROBLEMS,guard-swallowed-the-real-case"
+[ "$(_dw cache SESSION_LEDGER_DOUBLE_WIRE_CHECK=off)" = silent ] \
+  || DW_PROBLEMS="$DW_PROBLEMS,off-switch-does-not-switch-it-off"
+[ -z "$DW_PROBLEMS" ] && ok "two wirings of the same scripts are named, one wiring is not" \
+  || bad "the double-wiring check misjudges an installation" "${DW_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "integrity: a stale manifest is caught, and the recipe carries it to a foreign install"
 # Two ways this whole mechanism can be quietly useless. A manifest that is not regenerated
 # reports drift on a healthy install, which is worse than no check at all. And a manifest

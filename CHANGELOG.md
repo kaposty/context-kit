@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 (2026-08-17)
+
+- **The kit wired twice fired twice, and nothing said so.** A plugin brings its own wiring in
+  `hooks/hooks.json`, a project can wire the same scripts again in `.claude/settings.json`,
+  and the harness honours both. Measured in this repository straight out of the hook log:
+  four events carry an identical line twice, in the same second. The cost is not cosmetic,
+  because the restore is placed in the context twice, so a 6076 byte block becomes 12152
+  against a budget of 6000 and the budget that exists to protect the window is bypassed by a
+  factor of two while every log line still reads healthy. The session-start hook now names
+  the second wiring and asks for one spoken sentence. Reported rather than suppressed on
+  purpose: suppressing means one instance deciding the other already ran, and a wrong
+  decision there silently drops the restore, which is the loss this kit exists to prevent.
+  Silent on a plain standalone install, on a plain plugin install, and inside the kit
+  repository, where both wirings are deliberate (`SESSION_LEDGER_DOUBLE_WIRE_CHECK`).
+- One more assertion, 80 in total, seen red against the version that still had the defect.
+
 ## 1.1.0 (2026-08-17)
 
 Every defect below was found the same way: by installing the kit somewhere that is not this

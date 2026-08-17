@@ -30,7 +30,7 @@ worth more than a description of it.
 ## Before you open a pull request
 
 ```bash
-bash tests/run.sh            # 79 assertions, all green
+bash tests/run.sh            # 80 assertions, all green
 bash sync.sh --check         # delivery and installation identical, exit 0
 claude plugin validate .     # both manifests
 ```
@@ -44,11 +44,15 @@ lives in four files and several grammars, so change it in one command rather tha
 (`OLD` and `NEW` being the two numbers):
 
 ```bash
-sed -i '' "s/OLD assertions/NEW assertions/g; s/OLD%20assertions/NEW%20assertions/g; s/OLD of OLD green/NEW of NEW green/g; s/One of the OLD is/One of the NEW is/g" CHANGELOG.md CONTRIBUTING.md GUIDE.md README.md
+sed -i '' "s/OLD assertions/NEW assertions/g; s/OLD%20assertions/NEW%20assertions/g; s/OLD of OLD green/NEW of NEW green/g; s/One of the OLD is/One of the NEW is/g" CONTRIBUTING.md GUIDE.md README.md
 ```
 
-Drop the `''` after `-i` on GNU sed. Released sections of the changelog are history and are
-deliberately not swept forward: 1.0.0 shipped with 66 and still says so.
+Drop the `''` after `-i` on GNU sed. The changelog is deliberately NOT in that list, and it
+used to be: released sections are history, 1.0.0 shipped with 66 and still says so, and a
+sweep that reaches them turns the one document whose job is to record what was true at a
+version into a document that agrees with today. Write the new number into the `Unreleased`
+section by hand instead. The suite reads the changelog only above the first version heading,
+so that is the only part it can hold you to.
 
 ## Where to make the change
 

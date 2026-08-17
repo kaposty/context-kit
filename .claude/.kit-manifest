@@ -1,5 +1,5 @@
 # context-kit manifest, written by sync.sh. Do not edit by hand.
-# fingerprint 686d9492f1131600  files 15
+# fingerprint cc1bae548c4ce19a  files 15
 c411d5edd1dddfb479b2a3cec8da6b401e8a1e35ca0380bd3332fdb5e43d8781  commands/brief.md
 82a9eb29b0dd2386d0475b58a7ea9cc486d53bae4232995d71f8c20033c4070c  commands/checkpoint.md
 d37b4f777611f4cfedf27c59af79caa7d6005ac175fc26d1317a7c483b5313cd  commands/prove.md
@@ -8,7 +8,7 @@ cbb335f2e12512fffe64dec656f16d4405ec4ef3b3da0771e0ca7077cffdbc43  hooks/ledger-l
 76f8b38da6d108e7bcec7426cdf3ad415307d7fd39a5a9e2fb64bfae63a03b2c  hooks/ledger_render.py
 8c56fc6f92fce5cf704f4b62d2cd5d3ef2533a9432a4496ee430066c4de6f662  hooks/precompact-guard.sh
 d089c14f740385a8ef8b7ae194d8dd81dfb4824b91a870e4c1115fcb7c33841b  hooks/prompt-checkpoint.sh
-2e6addedb6c02a07022e2a43726a15bd1d8a019f35cc553301b39d2912ae31fa  hooks/session-start-prime.sh
+a06c3c59396b882c1ab09fad3326fb2187b95a7d68724460e9d12579091a155c  hooks/session-start-prime.sh
 ef510334cf2adcc1a87ba0afd72df48284a8e8282c3f70bacd1ebde48546a1af  hooks/session-start-reinject.sh
 bf64c2a21e3386b42c908933e9f537a02032eb8ce0dfd356e2adc464298f9596  skills/brief/SKILL.md
 c76b40e1ce8478208db170d29adec33fc58d3ae694a891834b5b6e681b4e4ad4  skills/checkpoint/SKILL.md
