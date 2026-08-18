@@ -5,7 +5,7 @@ by Mats Kaposty
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](#install-as-a-claude-code-plugin)
 [![Tests](https://img.shields.io/github/actions/workflow/status/kaposty/context-kit/test.yml?label=tests)](https://github.com/kaposty/context-kit/actions/workflows/test.yml)
-[![Verification](https://img.shields.io/badge/verification-85%20assertions-blue)](#verify-then-prove)
+[![Verification](https://img.shields.io/badge/verification-86%20assertions-blue)](#verify-then-prove)
 
 **Ledger · Checkpoint · Guardrail**
 
@@ -78,7 +78,7 @@ session-start block becomes visible text instead of a suppressed result. So the 
 almost nothing" promise below holds with `python3` present. No Windows support outside WSL.
 
 Measured on both: macOS with the bash 3.2 it still ships, and Ubuntu 24.04 with bash 5.2 and
-Python 3.12 on arm64, 85 of 85 green in each. Both matter for a real reason: `stat -f %m` is
+Python 3.12 on arm64, 86 of 86 green in each. Both matter for a real reason: `stat -f %m` is
 mtime on BSD and mount point on GNU, and that difference shipped a silent defect once.
 
 ## Install (as a Claude Code plugin)
@@ -260,7 +260,29 @@ the session, not to the source, so add it to your `.gitignore`:
 .claude/.checkpoint-trigger-state
 .claude/.effect-probe/
 .claude/log/
+.claude/.kit-backup-*/
 ```
+
+The last line is the one that gets forgotten, and it was: measured in a real project, 18
+files from two backup directories sat tracked in git, beside three markers and the hook log,
+because nothing had ever said anything about `.claude/`. See **updating an installation**
+below for where those come from.
+
+**Updating an installation.** Re-run the copy block above, and keep a backup first, because
+a file you adopted on purpose is about to be overwritten by the shipped one. Put it beside
+what it backs up, under the name the ignore list covers, and it stays out of your history:
+
+```bash
+STAMP=$(date +%Y%m%d-%H%M%S)
+mkdir -p .claude/.kit-backup-$STAMP
+(cd .claude && find hooks skills commands tools -type f 2>/dev/null) \
+  | while read -r f; do mkdir -p ".claude/.kit-backup-$STAMP/$(dirname "$f")"
+      cp ".claude/$f" ".claude/.kit-backup-$STAMP/$f"; done
+```
+
+Anything you keep on purpose belongs in `.claude/.kit-adopted`, one relative path per line
+with the reason next to it. The integrity check then stops reporting it, and an update leaves
+it alone instead of quietly replacing a decision you made.
 
 **Taking it back out.** A thing you install into your own `.claude/` should be removable
 without archaeology, so here is the reverse of the block above. It uses the same derived list,
@@ -289,12 +311,12 @@ taking that path in the first place.
 Two different questions, and most tools only answer the first.
 
 ```bash
-bash tests/run.sh    # 85 assertions over the renderer, the hooks and the tools
+bash tests/run.sh    # 86 assertions over the renderer, the hooks and the tools
 ```
 
 That proves the **mechanics**: the parts behave, the budget holds, the canary is never
 printed over a damaged restore. Run it against the commit before the release shaping and many
-go red, so the net can actually fail. One of the 85 is aimed at the suite itself: a checker
+go red, so the net can actually fail. One of the 86 is aimed at the suite itself: a checker
 that dies must go red, not silently green, which is how a broken check once passed while
 measuring nothing.
 

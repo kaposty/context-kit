@@ -3,6 +3,7 @@
 .claude/session-ledger.md
 .claude/session-ledger.archive/
 .claude/.checkpoint-ready*
+.claude/.kit-backup-*/
 .claude/.ledger-lint-state
 .claude/.checkpoint-trigger-state
 # Left over from kit versions that kept the effect probe inside the project. Current ones

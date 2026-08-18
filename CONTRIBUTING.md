@@ -30,7 +30,7 @@ worth more than a description of it.
 ## Before you open a pull request
 
 ```bash
-bash tests/run.sh            # 85 assertions, all green
+bash tests/run.sh            # 86 assertions, all green
 bash sync.sh --check         # delivery and installation identical, exit 0
 claude plugin validate .     # both manifests
 ```

@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Kaposty
     given-names: Mats
-version: 1.3.0
+version: 1.3.1
 date-released: 2026-08-18
 url: "https://github.com/kaposty/context-kit"
 repository-code: "https://github.com/kaposty/context-kit"

@@ -2276,6 +2276,31 @@ esac
   || bad "the digest reports stale git facts as measurements" "${BE_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
+echo "release: the backup an update leaves behind is ignorable too"
+# REPORTED FROM THE FIELD ON 2026-08-18, and this one the kit caused itself. Updating an
+# installation means copying over files somebody may have adopted, so whoever does it keeps a
+# backup first, and the only sensible place for it is beside the thing it backs up, under
+# `.claude/`. Nothing covered that: measured in a real project, 18 files from two backup
+# directories were tracked in git, on top of three markers and the hook log, because
+# `.gitignore` said nothing about `.claude/` at all.
+#
+# The derived check above cannot see this and that is not a flaw in it: it reads the paths the
+# SCRIPTS write, and no script writes a backup. A procedure in the README writes it, so the
+# README is where it has to be derived from, which is the same rule the phrase-trigger check
+# already follows: for anything with an audience, the documentation is the world.
+BACKUP_PROBLEMS=""
+for f in ".gitignore" "README.md"; do
+  grep -q '\.claude/\.kit-backup' "$KIT/$f" 2>/dev/null \
+    || BACKUP_PROBLEMS="$BACKUP_PROBLEMS,$f-does-not-cover-the-backup-directory"
+done
+# And the name has to be stated somewhere a person following the docs would use it, or the
+# ignore entry protects a convention nobody was told about.
+grep -q 'kit-backup' "$KIT/README.md" 2>/dev/null \
+  || BACKUP_PROBLEMS="$BACKUP_PROBLEMS,README-never-names-the-backup-directory"
+[ -z "$BACKUP_PROBLEMS" ] && ok "an update backup has a named home and both ignore lists cover it" \
+  || bad "an update leaves untracked mess in the adopter's repository" "${BACKUP_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "ledger: a ledger nobody signed is not silently adopted"
 # REPORTED FROM THE FIELD ON 2026-08-18. A session was handed another session's decisions,
 # open questions and measurements as its own, and the foreignness check logged foreign=0 the

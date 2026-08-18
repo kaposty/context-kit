@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.1 (2026-08-18)
+
+- **Updating an installation left mess in the adopter's repository, and the kit caused it.**
+  An update overwrites files somebody may have adopted on purpose, so whoever runs one keeps a
+  backup first, and the only sensible place for it is beside what it backs up, under
+  `.claude/`. Nothing covered that path. Measured in a real project: 18 files from two backup
+  directories tracked in git, on top of three markers and the hook log, because `.gitignore`
+  said nothing about `.claude/` at all. Both ignore lists now cover
+  `.claude/.kit-backup-*/`, and the README documents the update itself, with the backup
+  under the name the ignore list knows and a pointer at `.kit-adopted` for what to keep.
+  The derived check could not have caught this and that is not a flaw in it: it reads the
+  paths the SCRIPTS write, and no script writes a backup. A procedure in the README does, so
+  the new assertion derives from the README, the same rule the phrase-trigger check follows.
+  86 assertions.
+
 ## 1.3.0 (2026-08-18)
 
 Seven defects, none of them found here. Two sessions running the kit in other projects
