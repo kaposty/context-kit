@@ -83,6 +83,21 @@ fi
 SID="$(printf '%s' "$STDIN_JSON" \
   | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 case "${SID:-}" in ''|*[!a-zA-Z0-9._-]*) SID="" ;; esac
+# RESOLVE `auto` WHERE THE KNOWLEDGE IS. Reported from the field: sessions started from a
+# desktop or IDE surface get no environment of their own (24 fields in a real session record,
+# none of them env, args or command), so the only place a user can set SESSION_LEDGER_FILE is
+# the `env` block in settings.json, which is per DIRECTORY and therefore puts everybody back on
+# one file. The hooks receive the session id at run time, so `auto` set once in settings.json
+# gives every session its own carrier, including sessions nobody can hand an environment to.
+# FAIL-SAFE: no id, or an id that could escape the directory, falls back to the shared default
+# rather than to anything constructed out of it.
+if [ "${SESSION_LEDGER_FILE:-}" = "auto" ]; then
+  case "${SID:-}" in
+    ''|*[!a-zA-Z0-9._-]*) LEDGER=".claude/session-ledger.md" ;;
+    *) LEDGER=".claude/session-ledger.${SID}.md" ;;
+  esac
+fi
+
 if [ -n "$SID" ]; then
   MARKER=".claude/.checkpoint-ready.$SID"
 else

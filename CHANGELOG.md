@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.0 (2026-08-18)
+
+- **The carrier path from 1.4.0 was unreachable for the case that motivated it.** Sessions
+  started from a desktop or IDE surface get no environment of their own: counted in a real
+  session record, 24 fields, none of them env, args or command. So the only place a user could
+  set `SESSION_LEDGER_FILE` was the `env` block in settings.json, which is per DIRECTORY and
+  therefore puts every session back on one file, which is precisely what the variable exists to
+  avoid. It shipped with an instruction ("in the shell that starts the session") that a whole
+  class of users cannot follow, and nothing said so. `SESSION_LEDGER_FILE=auto` moves the
+  resolution to where the knowledge already is: the hooks receive the session id, so one
+  setting in settings.json gives every session its own `.claude/session-ledger.<id>.md`,
+  including sessions nobody can hand an environment to. Fail-safe, and that branch is asserted
+  rather than assumed: a missing id, or one that could escape the directory, falls back to the
+  shared default instead of building a path out of it. Opt-in, because it also ends continuity
+  between sessions in one directory, which is the point in parallel and a loss in series.
+  Found by the same measurement that found the lint judging one carrier and naming another,
+  because its session id was parsed after the size had already been taken.
+
 ## 1.4.0 (2026-08-18)
 
 - **A directory carried exactly one ledger, and settling ownership turned that into a dead

@@ -83,6 +83,22 @@ LOG=".claude/log/session-ledger-hook.log"
 _log() { mkdir -p "$(dirname "$LOG")" 2>/dev/null || true; printf '%s ledger-lint %s\n' "$(date -Iseconds 2>/dev/null || date)" "$1" >>"$LOG" 2>/dev/null || true; }
 
 STDIN_JSON="$(cat 2>/dev/null || true)"
+_SID="$(printf '%s' "$STDIN_JSON" \
+  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+# RESOLVE `auto` WHERE THE KNOWLEDGE IS. Reported from the field: sessions started from a
+# desktop or IDE surface get no environment of their own (24 fields in a real session record,
+# none of them env, args or command), so the only place a user can set SESSION_LEDGER_FILE is
+# the `env` block in settings.json, which is per DIRECTORY and therefore puts everybody back on
+# one file. The hooks receive the session id at run time, so `auto` set once in settings.json
+# gives every session its own carrier, including sessions nobody can hand an environment to.
+# FAIL-SAFE: no id, or an id that could escape the directory, falls back to the shared default
+# rather than to anything constructed out of it.
+if [ "${SESSION_LEDGER_FILE:-}" = "auto" ]; then
+  case "${_SID:-}" in
+    ''|*[!a-zA-Z0-9._-]*) LEDGER=".claude/session-ledger.md" ;;
+    *) LEDGER=".claude/session-ledger.${_SID}.md" ;;
+  esac
+fi
 
 # Both checks write into one message, delivered once at the end.
 MESSAGE=""
@@ -290,6 +306,7 @@ _say ""
 # expensive of the three cases.
 _SID="$(printf '%s' "$STDIN_JSON" \
   | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+
 _OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1 | awk '{print $1}')"
 if [ -n "$_SID" ] && [ -n "$_OWNER" ] && [ "$_OWNER" != "$_SID" ]; then
   _say "This ledger was written by another session (\`$_OWNER\`), so do NOT remove anything"

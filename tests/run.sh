@@ -2404,6 +2404,72 @@ esac
   || bad "the carrier path is not honoured everywhere" "${LP_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
+echo "ledger: a per-session carrier that a session cannot set an env var to reach"
+# REPORTED FROM THE FIELD ON 2026-08-18, one release after the path became a variable: for the
+# case that motivated it, the variable is UNREACHABLE. Sessions started from a desktop or IDE
+# surface get no environment of their own. Counted in a real session record: 24 fields, none of
+# them env, args or command. The only place that reaches hooks is the `env` block in
+# settings.json, which is per DIRECTORY, so setting it there puts every session back on one
+# file, which is exactly what the variable exists to avoid.
+#
+# The hooks know the session id at run time, all four of them, so the resolution can happen
+# where the knowledge is instead of where the user is expected to be. `auto` set ONCE in
+# settings.json gives every session its own carrier, including sessions nobody can hand an
+# environment to. Opt-in, because it also ends continuity between sessions in one directory:
+# a new session no longer picks the previous ledger up, which is the point for parallel work
+# and a loss for serial work.
+LAB_AU="$TMP/lab-autopath"
+rm -rf "$LAB_AU"; mkdir -p "$LAB_AU/.claude/hooks" "$LAB_AU/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/session-start-reinject.sh" \
+   "$KIT/hooks/ledger-lint.sh" "$KIT/hooks/precompact-guard.sh" \
+   "$KIT/hooks/ledger_render.py" "$LAB_AU/.claude/hooks/"
+printf '# Mine\n\n## TASK\nZX-AUTO-OK derived carrier\n' > "$LAB_AU/.claude/session-ledger.S1.md"
+printf '# Theirs\n\n## TASK\nthe shared carrier nobody should read here\n' > "$LAB_AU/.claude/session-ledger.md"
+_au() {   # args: hook, json -> output including stderr
+  ( cd "$LAB_AU" && printf '%s' "$2" \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_AU/cfg" \
+          SESSION_LEDGER_KIT_INTEGRITY=off SESSION_LEDGER_FILE=auto \
+      bash ".claude/hooks/$1" ) 2>&1
+}
+AU_PROBLEMS=""
+case "$(_au session-start-prime.sh '{"source":"startup","session_id":"S1"}')" in
+  *ZX-AUTO-OK*) : ;; *) AU_PROBLEMS="$AU_PROBLEMS,prime-did-not-derive-the-carrier" ;;
+esac
+case "$(_au session-start-reinject.sh '{"source":"compact","session_id":"S1"}')" in
+  *ZX-AUTO-OK*) : ;; *) AU_PROBLEMS="$AU_PROBLEMS,reinject-did-not-derive-the-carrier" ;;
+esac
+# A DIFFERENT session must not see it. This is the whole point, so it is asserted rather than
+# assumed: the second session gets its own empty carrier, not somebody elses full one.
+case "$(_au session-start-prime.sh '{"source":"startup","session_id":"S2"}')" in
+  *ZX-AUTO-OK*) AU_PROBLEMS="$AU_PROBLEMS,a-second-session-read-the-first-ones-carrier" ;;
+esac
+# The lint has to judge the same file, or it reports one session's size to another.
+python3 -c 'open("'"$LAB_AU/.claude/session-ledger.S1.md"'","a").write("\n" + "x"*9000)'
+case "$(_au ledger-lint.sh '{"session_id":"S1"}')" in
+  *session-ledger.S1.md*) : ;; *) AU_PROBLEMS="$AU_PROBLEMS,lint-did-not-derive-the-carrier" ;;
+esac
+# FAIL-SAFE, and this is the branch that must never invent a path. No id, or an id that could
+# escape the directory, falls back to the shared default rather than to anything constructed.
+case "$(_au session-start-prime.sh '{"source":"startup","session_id":"../../etc/passwd"}')" in
+  *"the shared carrier nobody should read here"*) : ;;
+  *) AU_PROBLEMS="$AU_PROBLEMS,a-hostile-id-did-not-fall-back-to-the-default" ;;
+esac
+case "$(_au session-start-prime.sh '{"source":"startup"}')" in
+  *"the shared carrier nobody should read here"*) : ;;
+  *) AU_PROBLEMS="$AU_PROBLEMS,a-missing-id-did-not-fall-back-to-the-default" ;;
+esac
+# And an explicit path still wins, so `auto` is one value of the variable and not a mode switch
+# that swallows it.
+case "$( ( cd "$LAB_AU" && printf '{"source":"startup","session_id":"S9"}' \
+  | env DISABLE_AUTO_COMPACT=true SESSION_LEDGER_KIT_INTEGRITY=off \
+        SESSION_LEDGER_FILE=".claude/session-ledger.S1.md" \
+    bash .claude/hooks/session-start-prime.sh ) 2>&1 )" in
+  *ZX-AUTO-OK*) : ;; *) AU_PROBLEMS="$AU_PROBLEMS,an-explicit-path-stopped-working" ;;
+esac
+[ -z "$AU_PROBLEMS" ] && ok "auto derives a carrier per session, and falls back rather than inventing one" \
+  || bad "the derived carrier path misbehaves" "${AU_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "ledger: a ledger nobody signed is not silently adopted"
 # REPORTED FROM THE FIELD ON 2026-08-18. A session was handed another session's decisions,
 # open questions and measurements as its own, and the foreignness check logged foreign=0 the

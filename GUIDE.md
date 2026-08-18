@@ -251,7 +251,7 @@ says so, but detection is not prevention.
 **Do I have to invoke the skill?** No. Hooks plus the model handle the normal case. Invoke
 `session-ledger` explicitly only to inspect, repair, or hand over.
 
-**How do I know it works here?** `bash tests/run.sh` proves the mechanics, 88 assertions, and
+**How do I know it works here?** `bash tests/run.sh` proves the mechanics, 89 assertions, and
 against the state before the release commit many of them go red, so the net can actually fail. Then run
 one real `/compact` and confirm the reasoning comes back. A design that is right in principle
 and unwired in practice preserves nothing.
@@ -278,7 +278,7 @@ and unwired in practice preserves nothing.
 | `context-manifest.example.yaml` | Config | read by the checkpoint | names this project's durable stores |
 | `tools/brief-digest.sh` | Tool | called by the briefing | facts from transcript, git and hook log, inside a character budget |
 | `tools/effect-probe.sh` | Tool | manual | plants a fact only the ledger could carry, then checks whether it survived a real compaction |
-| `tests/run.sh` | Tests | manual, CI | 88 assertions, no framework |
+| `tests/run.sh` | Tests | manual, CI | 89 assertions, no framework |
 
 ## 9. Why the renderer is its own file
 

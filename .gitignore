@@ -1,6 +1,7 @@
 # Runtime state of the installation. It belongs to the session, not to the source.
 .claude/log/
 .claude/session-ledger.md
+.claude/session-ledger.*
 .claude/session-ledger.archive/
 .claude/.checkpoint-ready*
 .claude/.kit-backup-*/
