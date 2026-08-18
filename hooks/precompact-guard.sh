@@ -118,13 +118,34 @@ fi
 #
 # So the shared marker is a FALLBACK rather than a competitor. Judged by its own marker when
 # it exists, by the shared one when it does not, and blocked only when neither is there. The
-# authorship rule then arrives on its own: once checkpoints write only the per-session path,
-# no shared marker gets created, the fallback finds nothing, and a session that never
-# checkpointed is refused. The age and idle checks below still apply to whichever file wins,
-# so a stale shared marker does not wave anybody through either.
+# age and idle checks below still apply to whichever file wins, so a stale shared marker does
+# not wave anybody through either.
+#
+# THE SENTENCE THAT USED TO STAND HERE WAS WRONG, and the field found it in a day: it said
+# the authorship rule would arrive on its own, because once checkpoints write only the
+# per-session path no shared marker gets created and the fallback finds nothing to fall back
+# to. That migration never finishes. The checkpoint instruction still offers the shared path
+# whenever the session id cannot be found in context, which happens whenever the session-start
+# block was lost, so shared markers keep being produced indefinitely. Measured 2026-08-18 in a
+# project running five concurrent sessions: the guard allowed a compaction on a shared marker
+# written one minute earlier by a DIFFERENT session, and two more from dead sessions were
+# lying around beside it.
+#
+# The fallback stays, because refusing a session its own window is still worse than the defect
+# it prevents. What changes is that it becomes ATTRIBUTABLE: a checkpoint that falls back
+# writes its own id into the file, so the guard can tell "nobody signed this" from "somebody
+# else signed this". An EMPTY shared marker still passes, and that is deliberate rather than
+# sloppy: it is the pre-migration shape, and locking it out is exactly the lockout that was
+# refused above.
 if [ ! -e "$MARKER" ] && [ -e "$MARKER_SHARED" ]; then
-  _log "no marker for this session, falling back to the shared one"
-  MARKER="$MARKER_SHARED"
+  SHARED_BY="$(head -1 "$MARKER_SHARED" 2>/dev/null | awk '{print $1}')"
+  case "${SHARED_BY:-}" in ''|*[!a-zA-Z0-9._-]*) SHARED_BY="" ;; esac
+  if [ -n "$SHARED_BY" ] && [ -n "$SID" ] && [ "$SHARED_BY" != "$SID" ]; then
+    _log "shared marker is signed by another session ($SHARED_BY), not falling back"
+  else
+    _log "no marker for this session, falling back to the shared one"
+    MARKER="$MARKER_SHARED"
+  fi
 fi
 
 # Neither marker -> no checkpoint ran -> block.

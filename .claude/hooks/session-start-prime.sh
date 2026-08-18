@@ -102,6 +102,16 @@ print(json.dumps({"suppressOutput": True,
   printf '%s' "$PAYLOAD"   # no python3: visible, but a visible restore beats none
 }
 
+# Is a settings file something the harness will actually honour? Text is not configuration:
+# a file that does not parse is discarded WHOLE by the harness, and everything in it goes with
+# it. Answering "cannot tell" as valid is the fail-open that matters here, because the checks
+# built on this only ever ADD a warning.
+_valid_json() {
+  [ -f "$1" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" >/dev/null 2>&1
+}
+
 case "${SOURCE:-startup}" in
   startup|clear) ;;
   *) _log "skip (source is not startup/clear)"; exit 0 ;;
@@ -134,6 +144,7 @@ esac
 
 KEPT=0
 FOREIGN=0        # kept ledger was written by a different session
+UNSIGNED=0       # kept ledger carries no _session: stamp, so nobody can be named as owner
 RECENT_MIN=""    # how recently that other session touched it
 # PORTABLE mtime, and the reason it needs its own function. `stat -f %m` is BSD/macOS
 # "modification time", but on GNU/Linux `-f` means --file-system and `%m` is the mount
@@ -156,7 +167,19 @@ if [ -s "$LEDGER" ]; then
   # (`_session: <uuid> (Manager, Desktop)_`), and comparing the whole line declared the
   # rightful owner foreign: 55 characters against 36, measured.
   OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1 | awk '{print $1}')"
-  if [ -n "$SESSION_ID" ] && [ -n "$OWNER" ] && [ "$OWNER" != "$SESSION_ID" ]; then
+  # AN EMPTY STAMP IS NOT A MATCH, and reading it as one was a fail-open that the field hit
+  # on 2026-08-18: a session was handed another session's decisions, open questions and
+  # measurements as its own, and the log said foreign=0 throughout, because the ledger carried
+  # no `_session:` line at all and the comparison was skipped. "Cannot attribute" came out as
+  # "mine". Every ledger seeded before the stamp existed is in that state, and so is every one
+  # written by an adopted checkpoint that does not know about it.
+  #
+  # The costs decide it, and they are not symmetric. A wrong "foreign" costs one paragraph of
+  # context that a session reads and dismisses. A wrong "mine" invites that session to append
+  # to, trim, or archive reasoning that has no second copy anywhere.
+  if [ -n "$SESSION_ID" ] && [ -z "$OWNER" ]; then
+    UNSIGNED=1
+  elif [ -n "$SESSION_ID" ] && [ -n "$OWNER" ] && [ "$OWNER" != "$SESSION_ID" ]; then
     FOREIGN=1
     MTIME="$(_mtime "$LEDGER")"
     NOW="$(date +%s 2>/dev/null || echo "")"
@@ -168,7 +191,7 @@ if [ -s "$LEDGER" ]; then
       RECENT_MIN=$(( ( NOW - MTIME ) / 60 ))
     fi
   fi
-  _log "keep+restore (foreign=${FOREIGN})"
+  _log "keep+restore (foreign=${FOREIGN} unsigned=${UNSIGNED})"
 else
   _log "FIRED (prime, no ledger yet)"
 fi
@@ -257,6 +280,39 @@ if [ "${SESSION_LEDGER_KIT_INTEGRITY:-on}" != "off" ] && command -v python3 >/de
   fi
 fi
 
+# 1b-ter. A SETTINGS FILE THE HARNESS THREW AWAY.
+#
+# Not a defect in this kit, and reported anyway, because the kit is the only thing in the room
+# that can see it: it reads these files already, and nothing else ever says a word. Measured in
+# a real project on 2026-08-18. One trailing comma made `.claude/settings.json` invalid, so the
+# harness discarded the file WHOLE: the `env` block, `permissions.allow` and `permissions.deny`
+# were all inert for 19 hours, with a deny rule protecting `.env` and one blocking `rm -rf`
+# among the casualties. Nothing warned anybody, and two checks in this very hook were misled by
+# the same file, because both read it as text.
+#
+# The cost of the report is one paragraph in a case that is always a mistake. The cost of
+# staying quiet is a project running for days with its guardrails switched off believing they
+# are on.
+if [ "${SESSION_LEDGER_SETTINGS_CHECK:-on}" != "off" ] && command -v python3 >/dev/null 2>&1; then
+  _BADJSON=""
+  for _f in ".claude/settings.json" ".claude/settings.local.json" \
+            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"; do
+    [ -f "$_f" ] || continue
+    _valid_json "$_f" || _BADJSON="$_BADJSON \`$_f\`"
+  done
+  if [ -n "$_BADJSON" ]; then
+    _add ""
+    _add "**A settings file here is not valid JSON, so the harness is ignoring all of it:**"
+    _add "$_BADJSON. This is not a partial failure. Everything in that file is inert, including"
+    _add "\`env\`, \`permissions.allow\` and, the one that matters, \`permissions.deny\`, so rules"
+    _add "somebody wrote to block dangerous commands or protect secrets are not in force and"
+    _add "nothing else will mention it. Say this to the user in one sentence, near the top of"
+    _add "your reply. \`python3 -m json.tool <file>\` names the line. Do not fix it unasked: it is"
+    _add "their file, and a trailing comma is the usual cause."
+    _log "invalid settings file reported:$_BADJSON"
+  fi
+fi
+
 # 1b-bis. THE SAME KIT WIRED TWICE, which makes every hook fire twice.
 #
 # Measured in this kit's own repository on 2026-08-17, straight out of the hook log: four
@@ -281,22 +337,46 @@ if [ "${SESSION_LEDGER_DOUBLE_WIRE_CHECK:-on}" != "off" ] && [ ! -f ".claude-plu
   case "${_SELF_DIR:-}" in
     "$PWD/.claude/hooks"|".claude/hooks"|"") ;;   # one wiring, and it is this one
     *)
-      _DOUBLE=""
+      _DOUBLE=""; _DCOUNT=0
       for _f in ".claude/settings.json" ".claude/settings.local.json" \
                 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"; do
         [ -f "$_f" ] || continue
-        grep -q 'session-start-prime\.sh' "$_f" 2>/dev/null && _DOUBLE="$_DOUBLE \`$_f\`"
+        # A FILE THE HARNESS THREW AWAY IS NOT A WIRING. This grep reads the file as text, so
+        # a settings file that does not parse looks exactly like one that does, and the check
+        # announced a doubling that was not happening. Measured 2026-08-18: a trailing comma
+        # made the file invalid, the harness discarded it whole, only the plugin fired, and
+        # the warning insisted every hook was running twice.
+        _valid_json "$_f" || continue
+        # COUNT, DO NOT ANSWER YES OR NO. A settings file can wire the same script more than
+        # once inside itself: measured 2026-08-18, `session-start-reinject.sh` appeared twice
+        # under SessionStart in one file, so with the plugin that hook fired THREE times while
+        # this text said "twice". A number a reader repeats has to be one the check measured.
+        # -o AND wc, NOT grep -c: `grep -c` counts matching LINES, and a settings file written
+        # by a tool is one line, so three wirings in it counted as one. Found by the assertion
+        # written for this very fix, which is the only reason the number in the message is
+        # worth printing at all.
+        _n="$(grep -o -e 'session-start-prime\.sh' -e 'session-start-reinject\.sh' \
+                      -e 'precompact-guard\.sh' -e 'ledger-lint\.sh' \
+                      -e 'prompt-checkpoint\.sh' "$_f" 2>/dev/null | wc -l | tr -d '[:space:]')"
+        case "${_n:-0}" in ''|0) continue ;; esac
+        _DOUBLE="$_DOUBLE \`$_f\` ($_n)"
+        _DCOUNT=$(( ${_DCOUNT:-0} + _n ))
       done
       if [ -n "$_DOUBLE" ]; then
         _add ""
-        _add "**This kit is wired twice, so every hook here runs twice.** The plugin wires it, and"
-        _add "so does$_DOUBLE. Both fire. This block is in the context twice right now, which is"
-        _add "double the window the restore budget is supposed to cap, and the hook log shows two"
-        _add "identical lines per event. Say this to the user in one sentence and offer the fix, do"
-        _add "not apply it unasked: keep ONE of the two. Remove the kit's SessionStart, PreCompact,"
-        _add "Stop and UserPromptSubmit entries from that settings file to keep the plugin, or"
-        _add "disable the plugin to keep the local copy. Nothing else in the kit can undo this: it"
-        _add "is a wiring decision in a human's file."
+        _add "**This kit is wired more than once, so its hooks can run more than once here.** The"
+        _add "plugin wires it, and so does$_DOUBLE, which is $_DCOUNT further entry or entries."
+        _add "The harness honours all of them. Where a hook does fire repeatedly the restore is"
+        _add "placed in the context that many times over, against a budget meant to cap it once,"
+        _add "and \`.claude/log/session-ledger-hook.log\` shows it as identical lines in the same"
+        _add "second. **Read the log before repeating any of that as fact**: this check sees the"
+        _add "wirings, not the firings, and it once asserted a doubling that was not happening."
+        _add "Say this to the user in one sentence, do not act on it unasked, and do NOT recommend"
+        _add "which side to remove. The two copies can differ, and **which of the two is newer is"
+        _add "not knowable from the wiring**: measured in a real project, the local copies were the"
+        _add "newer ones in four of five hooks, deliberately adopted, and following the obvious"
+        _add "advice would have discarded a hardening pass. Diff them first, and check"
+        _add "\`.claude/.kit-adopted\` for a note saying the divergence is intended."
         _log "double wiring reported:$_DOUBLE"
       fi ;;
   esac
@@ -430,6 +510,29 @@ if [ "$KEPT" -eq 1 ]; then
         _add "directory. Two sessions sharing one ledger interleave and corrupt both: use a"
         _add "separate worktree per session._"
       fi
+    fi
+
+    # THE THIRD STATE: nobody can be named as the owner, which is not the same as owning it.
+    # Reported from the field on 2026-08-18, where this gap handed one session another
+    # session's reasoning as its own. The block is deliberately shorter than the foreign one:
+    # it asks a question rather than prescribing an archive, because an unsigned ledger is
+    # just as likely to be this session's own work from before the stamp existed.
+    if [ "$UNSIGNED" -eq 1 ]; then
+      _add ""
+      _add "**Task check (first turn, before appending anything):** this ledger is **not signed**,"
+      _add "so nothing here can tell whose it is. Read \`## TASK\` above and compare it with what"
+      _add "you have actually been asked to do. If it matches, claim the ledger by writing"
+      _add "\`_session: ${SESSION_ID}_\` into its header, and it stops being ambiguous for"
+      _add "everyone after you. If it does NOT match, it belongs to another task: carry its"
+      _add "decisions and dropped paths into the project state file (\`## PLAN\` names it), then"
+      _add "archive it before you write anything of your own:"
+      _add ""
+      _add '```'
+      _add "mkdir -p $ARCHIVE_DIR && mv $LEDGER $ARCHIVE_DIR/ledger-\$(date +%Y%m%d-%H%M%S).md"
+      _add '```'
+      _add ""
+      _add "Appending to a ledger that is not yours mixes two tasks, and the reasoning it holds"
+      _add "has no second copy."
     fi
   fi
 fi

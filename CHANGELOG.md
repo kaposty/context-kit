@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.3.0 (2026-08-18)
+
+Seven defects, none of them found here. Two sessions running the kit in other projects
+measured their own installation and reported what it did, which is the only way most of these
+could have surfaced: every one of them looks correct from inside a working checkout.
+
+- **A ledger nobody signed was silently adopted as your own.** The owner check compares the
+  `_session:` stamp against the running session, and a ledger with no stamp at all skipped the
+  comparison entirely, so "cannot attribute" came out as "mine". Measured in a project with
+  five concurrent sessions: one was handed another session's decisions, open questions and
+  measurements as its own, with `foreign=0` in the log throughout, and came within a step of
+  appending to them. Every ledger seeded before the stamp existed is in that state, as is every
+  one written by an adopted checkpoint that does not know about it. There is now a third
+  verdict between mine and foreign: unsigned ledgers say so, ask the session to compare
+  `## TASK` against its actual task, and offer both the claim and the archive. The costs are
+  not symmetric, which is what decided it: a wrong "foreign" costs a paragraph of context, a
+  wrong "mine" invites a session to trim or archive reasoning that has no second copy.
+- **The compaction guardrail waved a session through on another session's marker.** The shared
+  marker is a fallback for sessions that started before the per-session one existed, and the
+  reasoning shipped with it was that the fallback would expire on its own once checkpoints
+  wrote only the new path. It does not: the checkpoint still offers the shared path whenever
+  the session id cannot be found, so shared markers keep being produced and the migration never
+  ends. Measured: a compaction allowed on a marker written one minute earlier by a different
+  session, with two more from dead sessions beside it. The fallback stays, because locking a
+  session out of its own window is still worse, and it becomes attributable instead: a
+  checkpoint that falls back writes its id into the file, and a marker naming somebody else is
+  refused. An unsigned shared marker still passes, which is the pre-migration case.
+- **The double-wiring warning asserted two things it had never measured**, one release after
+  it was added. It said the restore was in the context twice and that the log showed two
+  identical lines per event. Both were checked in the field and both were false there, because
+  the settings file it had found the wiring in was invalid JSON and the harness had discarded
+  it, so only the plugin was firing. It now reports what it can see, the wirings, and says in
+  the same breath that firings are a different question and the log is where they are.
+- **A settings file the harness threw away is not a wiring, and now it is reported.** One
+  trailing comma made `.claude/settings.json` invalid, and the harness discarded the whole
+  file: `env`, `permissions.allow` and `permissions.deny` inert for 19 hours, including a rule
+  protecting `.env` and one blocking `rm -rf`, with nothing anywhere saying a word. Not a
+  defect in this kit, and reported anyway, because the kit reads those files already and is
+  the only thing in the room that can see the hole (`SESSION_LEDGER_SETTINGS_CHECK`).
+- **The wiring report said "twice" and counted files, not wirings.** A settings file can wire
+  the same script more than once inside itself: measured, `session-start-reinject.sh` twice
+  under SessionStart, so with the plugin that hook fired three times while the text said twice.
+  It counts now. The first version of the count used `grep -c`, which counts matching LINES,
+  and a settings file written by a tool is one line, so three wirings counted as one. That was
+  caught by the assertion written for the fix.
+- **The wiring report recommended the lossy direction first.** It offered "drop the settings
+  entries and keep the plugin" and "disable the plugin and keep the local copy" as equals. In
+  the project that reported it the LOCAL copies were the newer ones, four hooks of five,
+  deliberately adopted and documented, and a session followed the order the text named first
+  and had to retract it after diffing. This is the same mistake the integrity report already
+  fixed once: a digest cannot tell an old file from an improved one, so it must not point at a
+  direction. The report now says which way is not knowable and names `.kit-adopted`.
+- **`brief-digest.sh` reported stale git facts in the voice of measurements.** On a checkout 32
+  commits behind its upstream it printed "no commits in window" while 24 commits sat on the
+  branch inside that window, and called a carrier file unsaved that had been written an hour
+  earlier. A briefing repeating that tells somebody they wrote nothing all day. The tree is
+  deliberately NOT swapped for the upstream, since the local checkout is what the session
+  worked in; it is declared in the header instead, in the same voice as `INCOMPLETE` and
+  `CUT FOR SPACE`, and silent on a tree that is current or has no upstream.
+- Five more assertions, 85 in total, each seen red against the version that still carried the
+  defect. Four of the existing ones had to be re-anchored: they matched the wording of the
+  warning rather than the log line, so improving a sentence turned them red without any
+  behaviour changing, which is the substring trap this suite already has a rule about.
+
 ## 1.2.0 (2026-08-17)
 
 - **The kit wired twice fired twice, and nothing said so.** A plugin brings its own wiring in

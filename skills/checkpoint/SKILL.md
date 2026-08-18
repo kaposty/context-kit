@@ -208,7 +208,9 @@ mkdir -p .claude && touch .claude/.checkpoint-ready.<the id from that line>
 ```
 
 If you genuinely cannot find the path (no session-start block in context and none in the
-transcript), write `.claude/.checkpoint-ready` instead and say so in the hand-off. That is
+transcript), write your session id into `.claude/.checkpoint-ready` instead
+(`echo <id> > .claude/.checkpoint-ready`, and if you do not have an id either, an empty
+`touch` still counts) and say so in the hand-off. That is
 the shared fallback the guardrail still honours; it is only worse in a directory where
 several sessions run at once, and there it is worse for a measured reason. A single shared
 file made the guardrail test freshness rather than authorship, so a session that had never

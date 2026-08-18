@@ -2090,10 +2090,16 @@ _dw() {   # args: <hook to run: cache|local> then zero or more VAR=VALUE -> warn
     cache) _SCRIPT="$LAB_DW/cache/hooks/session-start-prime.sh" ;;
     *)     _SCRIPT="$LAB_DW/proj/.claude/hooks/session-start-prime.sh" ;;
   esac
-  _O="$(cd "$LAB_DW/proj" && echo '{"source":"startup","session_id":"S1"}' \
+  # JUDGED FROM THE LOG LINE, not from the sentence. The first version of these cases matched
+  # the prose ("wired twice"), so rewording the message to stop overstating what it measured
+  # turned four green assertions red without a single behaviour changing. A test that greps a
+  # sentence is testing the sentence.
+  rm -f "$LAB_DW/proj/.claude/log/session-ledger-hook.log"
+  (cd "$LAB_DW/proj" && echo '{"source":"startup","session_id":"S1"}' \
         | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_DW/cfg" \
-              SESSION_LEDGER_KIT_INTEGRITY=off "$@" bash "$_SCRIPT" 2>/dev/null)"
-  case "$_O" in *"wired twice"*) echo warn ;; *) echo silent ;; esac
+              SESSION_LEDGER_KIT_INTEGRITY=off "$@" bash "$_SCRIPT" >/dev/null 2>&1)
+  grep -q 'double wiring reported' "$LAB_DW/proj/.claude/log/session-ledger-hook.log" 2>/dev/null \
+    && echo warn || echo silent
 }
 DW_PROBLEMS=""
 # The real case: a plugin install on a project that also wires the same scripts itself.
@@ -2128,6 +2134,226 @@ rm -rf "$LAB_DW/proj/.claude-plugin"
   || DW_PROBLEMS="$DW_PROBLEMS,off-switch-does-not-switch-it-off"
 [ -z "$DW_PROBLEMS" ] && ok "two wirings of the same scripts are named, one wiring is not" \
   || bad "the double-wiring check misjudges an installation" "${DW_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "integrity: a settings file the harness threw away is not a wiring"
+# REPORTED FROM THE FIELD ON 2026-08-18, and it is two defects in one file. A trailing comma
+# made a project settings.json invalid, so the harness discarded the WHOLE file: env,
+# permissions.allow and permissions.deny all silently inert, for 19 hours, with the deny rule
+# protecting .env and rm -rf among the casualties. Nothing anywhere said a word.
+#   1. The double-wiring check greps that file as TEXT, so it saw a wiring in a file that was
+#      not in effect and announced a doubling that was not happening. A warning that states a
+#      falsifiable fact and gets it wrong costs the credibility of the ones that are right.
+#   2. The kit is already reading these files. It is the only thing in the room that can see
+#      the hole, which makes staying quiet about it a choice rather than a limitation.
+LAB_BJ="$TMP/lab-badjson"
+rm -rf "$LAB_BJ"; mkdir -p "$LAB_BJ/cache/hooks" "$LAB_BJ/proj/.claude/hooks" "$LAB_BJ/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_BJ/cache/hooks/"
+cp "$KIT/hooks/session-start-prime.sh" "$LAB_BJ/proj/.claude/hooks/"
+printf '# L\n\n## TASK\nx\n' > "$LAB_BJ/proj/.claude/session-ledger.md"
+_bj() {   # -> raw output of the plugin-side hook against the project
+  (cd "$LAB_BJ/proj" && echo '{"source":"startup","session_id":"S1"}' \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_BJ/cfg" \
+          SESSION_LEDGER_KIT_INTEGRITY=off \
+      bash "$LAB_BJ/cache/hooks/session-start-prime.sh" 2>/dev/null)
+}
+BJ_PROBLEMS=""
+# The wiring is there but the file is invalid, so the harness is running neither of its hooks.
+printf '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash .claude/hooks/session-start-prime.sh"}]}]},}\n' \
+  > "$LAB_BJ/proj/.claude/settings.json"
+case "$(_bj)" in
+  *"wired more than once"*) BJ_PROBLEMS="$BJ_PROBLEMS,claims-a-doubling-from-a-file-the-harness-discarded" ;;
+esac
+case "$(_bj)" in
+  *"is not valid JSON"*) : ;;
+  *) BJ_PROBLEMS="$BJ_PROBLEMS,stays-silent-about-a-settings-file-that-is-inert" ;;
+esac
+# Valid again: the wiring is real, the doubling claim is allowed, the JSON report goes away.
+printf '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash .claude/hooks/session-start-prime.sh"}]}]}}\n' \
+  > "$LAB_BJ/proj/.claude/settings.json"
+case "$(_bj)" in
+  *"wired more than once"*) : ;;
+  *) BJ_PROBLEMS="$BJ_PROBLEMS,valid-wiring-no-longer-reported" ;;
+esac
+case "$(_bj)" in
+  *"is not valid JSON"*) BJ_PROBLEMS="$BJ_PROBLEMS,false-alarm-on-a-valid-settings-file" ;;
+esac
+# THE WARNING MUST NOT STATE WHAT IT DID NOT MEASURE. The first version asserted "this block
+# is in the context twice right now" and "the hook log shows two identical lines per event".
+# Both were checked in the field and both were false in the case that was reported.
+case "$(_bj)" in
+  *"in the context twice right now"*|*"log shows two identical lines"*)
+    BJ_PROBLEMS="$BJ_PROBLEMS,asserts-a-consequence-it-never-measured" ;;
+esac
+[ -z "$BJ_PROBLEMS" ] && ok "an invalid settings file is reported and never counted as a wiring" \
+  || bad "the kit trusts a settings file the harness threw away" "${BJ_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "integrity: the wiring report counts, and never suggests the lossy direction"
+# TWO MORE FROM THE FIELD, 2026-08-18, in a second project.
+#   1. A settings file wired session-start-reinject.sh TWICE inside itself, so with the plugin
+#      that hook fires three times. The report said "twice", which is a number a reader will
+#      repeat. If the check is running anyway, counting is free.
+#   2. The report offered its two resolutions as equals: drop the settings entries and keep the
+#      plugin, or disable the plugin and keep the local copy. In that project the LOCAL copies
+#      were the newer ones, four of five hooks, adopted on purpose and documented in
+#      .kit-adopted. A session followed the order the text names first, recommended discarding
+#      the local wiring, and had to retract it after diffing. This kit already fixed exactly
+#      this mistake once, in the integrity report: a digest cannot tell an old file from an
+#      improved one, so it must not point at a direction. The same rule applies here.
+LAB_WC="$TMP/lab-wirecount"
+rm -rf "$LAB_WC"; mkdir -p "$LAB_WC/cache/hooks" "$LAB_WC/proj/.claude/hooks" "$LAB_WC/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_WC/cache/hooks/"
+cp "$KIT/hooks/session-start-prime.sh" "$LAB_WC/proj/.claude/hooks/"
+printf '# L\n\n## TASK\nx\n' > "$LAB_WC/proj/.claude/session-ledger.md"
+python3 - "$LAB_WC/proj/.claude/settings.json" <<'PJ'
+import json, sys
+h = lambda c: {"type": "command", "command": c}
+json.dump({"hooks": {"SessionStart": [
+    {"matcher": "startup", "hooks": [h("bash .claude/hooks/session-start-prime.sh")]},
+    {"matcher": "compact", "hooks": [h("bash .claude/hooks/session-start-reinject.sh")]},
+    {"matcher": "resume",  "hooks": [h("bash .claude/hooks/session-start-reinject.sh")]}]}},
+    open(sys.argv[1], "w"))
+PJ
+WC_OUT="$(cd "$LAB_WC/proj" && echo '{"source":"startup","session_id":"S1"}' \
+  | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_WC/cfg" SESSION_LEDGER_KIT_INTEGRITY=off \
+    bash "$LAB_WC/cache/hooks/session-start-prime.sh" 2>/dev/null)"
+WC_PROBLEMS=""
+case "$WC_OUT" in *"wired more than once"*) : ;; *) WC_PROBLEMS="$WC_PROBLEMS,stopped-reporting-a-real-double-wiring" ;; esac
+# Three entries wire kit hooks here, so a flat "twice" is a number the reader will repeat wrongly.
+case "$WC_OUT" in *"3 "*|*"three "*) : ;; *) WC_PROBLEMS="$WC_PROBLEMS,does-not-count-the-wirings-it-found" ;; esac
+# No ordered remedy: naming one side first is a recommendation, and one side can lose work.
+case "$WC_OUT" in
+  *"to keep the plugin"*|*"disable the plugin to keep"*)
+    WC_PROBLEMS="$WC_PROBLEMS,still-names-a-direction-it-cannot-know-is-safe" ;;
+esac
+case "$WC_OUT" in *"which of the two is newer"*|*"not knowable"*|*"differ"*) : ;;
+  *) WC_PROBLEMS="$WC_PROBLEMS,does-not-warn-that-the-copies-may-differ" ;; esac
+[ -z "$WC_PROBLEMS" ] && ok "the wiring report counts them and leaves the direction to the reader" \
+  || bad "the wiring report misinforms" "${WC_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "digest: a working tree behind its upstream is declared, not measured silently"
+# REPORTED FROM THE FIELD ON 2026-08-18, and it is the worst class in this kit: two lines that
+# LOOK like measurements and are false, in a format whose whole promise is facts only.
+# The checkout sat on a detached HEAD, 32 commits behind origin/main. The digest reported
+# `GIT: no commits in window` while 24 commits were on the upstream inside that window, and
+# `UNSAVED: 2858 entries of work since it was last written` about a carrier file that had been
+# written on the upstream an hour earlier. A briefing repeating that tells a person they wrote
+# nothing all day while thirteen pull requests were merged.
+#
+# Measuring against the upstream instead would change what the digest is for, since the local
+# tree is what the session actually worked in. So the fix is the one the digest already uses
+# for every other bound it hits: say so in the header, in the same voice as INCOMPLETE and
+# CUT FOR SPACE, and let the skill hand it to the reader.
+LAB_BE="$TMP/lab-behind"
+rm -rf "$LAB_BE"; mkdir -p "$LAB_BE/up"
+( cd "$LAB_BE/up" && git init -q -b main && git config user.email t@t && git config user.name t
+  printf 'one\n' > f.txt && git add -A && git commit -qm one ) >/dev/null 2>&1
+git clone -q "$LAB_BE/up" "$LAB_BE/work" >/dev/null 2>&1
+( cd "$LAB_BE/up" && printf 'two\n' >> f.txt && git commit -qam two
+                     printf 'three\n' >> f.txt && git commit -qam three ) >/dev/null 2>&1
+( cd "$LAB_BE/work" && git fetch -q origin ) >/dev/null 2>&1
+BE_PROBLEMS=""
+BE_OUT="$( cd "$LAB_BE/work" && bash "$KIT/tools/brief-digest.sh" 2>/dev/null )"
+case "$BE_OUT" in
+  *"behind"*) : ;;
+  *) BE_PROBLEMS="$BE_PROBLEMS,silent-about-a-tree-two-commits-behind-its-upstream" ;;
+esac
+# Up to date: no note, or the warning becomes noise on every healthy repository there is.
+( cd "$LAB_BE/work" && git merge -q --ff-only origin/main ) >/dev/null 2>&1
+BE_OUT="$( cd "$LAB_BE/work" && bash "$KIT/tools/brief-digest.sh" 2>/dev/null )"
+case "$BE_OUT" in
+  *"commit(s) behind"*) BE_PROBLEMS="$BE_PROBLEMS,false-alarm-on-a-tree-that-is-up-to-date" ;;
+esac
+# No upstream at all is the ordinary case for a local-only repository and must stay quiet.
+( cd "$LAB_BE/work" && git remote remove origin ) >/dev/null 2>&1
+BE_OUT="$( cd "$LAB_BE/work" && bash "$KIT/tools/brief-digest.sh" 2>/dev/null )"
+case "$BE_OUT" in
+  *"commit(s) behind"*) BE_PROBLEMS="$BE_PROBLEMS,false-alarm-on-a-repository-with-no-upstream" ;;
+esac
+[ -z "$BE_PROBLEMS" ] && ok "the digest declares a tree that is behind its upstream" \
+  || bad "the digest reports stale git facts as measurements" "${BE_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "ledger: a ledger nobody signed is not silently adopted"
+# REPORTED FROM THE FIELD ON 2026-08-18. A session was handed another session's decisions,
+# open questions and measurements as its own, and the foreignness check logged foreign=0 the
+# whole time. The cause is narrower than it looked and it is a fail-open: the check compares
+# `_session:` against the running id, and the ledger carried NO `_session:` line at all, so
+# OWNER was empty, the comparison was skipped, and "cannot attribute" came out as "mine".
+#
+# Every ledger seeded before the stamp existed is in that state, and so is every ledger
+# written by an adopted checkpoint that does not know about it. The costs are not symmetric,
+# which is what decides this: a wrong "foreign" costs one paragraph of context, a wrong
+# "mine" invites a session to append to, trim, or archive reasoning that has no second copy.
+LAB_UN="$TMP/lab-unsigned"
+rm -rf "$LAB_UN"; mkdir -p "$LAB_UN/.claude/hooks" "$LAB_UN/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$LAB_UN/.claude/hooks/"
+_un() {   # args: ledger head -> raw hook output
+  printf '%s\n\n## TASK\nsomebody elses task\n' "$1" > "$LAB_UN/.claude/session-ledger.md"
+  (cd "$LAB_UN" && echo '{"source":"startup","session_id":"MINE-1"}' \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_UN/cfg" \
+          SESSION_LEDGER_KIT_INTEGRITY=off \
+      bash .claude/hooks/session-start-prime.sh 2>/dev/null)
+}
+UN_PROBLEMS=""
+case "$(_un '# Session Ledger
+_started: 2026-08-15T19:53:48+02:00_')" in
+  *"not signed"*|*"nobody signed"*|*"unsigned"*) : ;;
+  *) UN_PROBLEMS="$UN_PROBLEMS,an-unsigned-ledger-is-adopted-in-silence" ;;
+esac
+# A ledger this session signed is its own, and must stay quiet.
+case "$(_un '# Session Ledger
+_session: MINE-1_')" in
+  *"not signed"*|*"nobody signed"*|*"written by a"*)
+    UN_PROBLEMS="$UN_PROBLEMS,warns-about-a-ledger-this-session-signed" ;;
+esac
+# A ledger signed by somebody else keeps the verdict it always had.
+case "$(_un '# Session Ledger
+_session: OTHER-9_')" in
+  *"written by a"*) : ;;
+  *) UN_PROBLEMS="$UN_PROBLEMS,lost-the-plain-foreign-case" ;;
+esac
+[ -z "$UN_PROBLEMS" ] && ok "an unsigned ledger is flagged, a signed one is judged on its stamp" \
+  || bad "the ledger owner check fails open" "${UN_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "guard: the shared marker is a fallback, not a free pass for anyone"
+# REPORTED FROM THE FIELD ON 2026-08-18: the guard let a compaction through on a shared
+# marker written one minute earlier BY A DIFFERENT SESSION, in a directory with five of them.
+#
+# The fallback itself was the right call and stays: refusing a session its own window because
+# it started before the per-session marker existed is worse than the defect. What was wrong
+# was the reasoning that it would expire on its own. It does not, because the checkpoint
+# instruction still offers the shared path whenever the id cannot be found, so the migration
+# never finishes. The fix is to make the fallback ATTRIBUTABLE rather than to remove it: a
+# checkpoint that falls back writes its own id into the file, and a shared marker naming a
+# different session is refused. An EMPTY shared marker still passes, which is exactly the
+# pre-migration case that must not be locked out.
+LAB_SM="$TMP/lab-sharedmarker"
+rm -rf "$LAB_SM"; mkdir -p "$LAB_SM/.claude"
+printf '# L\n\n## TASK\nreal work\n\n## DECIDED\n- something\n' > "$LAB_SM/.claude/session-ledger.md"
+_sm() {   # -> allow | block. The guard refuses through EXIT CODE 2 and plain text, not JSON;
+          # a helper that looked for a decision field found none and read every refusal as a
+          # pass, which is the same shape of mistake this whole section is about.
+  (cd "$LAB_SM" && printf '{"trigger":"manual","session_id":"MINE-1"}' \
+    | bash "$KIT/hooks/precompact-guard.sh" >/dev/null 2>&1)
+  [ "$?" -eq 0 ] && echo allow || echo block
+}
+SM_PROBLEMS=""
+rm -f "$LAB_SM/.claude/.checkpoint-ready"*
+[ "$(_sm)" = block ] || SM_PROBLEMS="$SM_PROBLEMS,no-marker-at-all-was-allowed"
+: > "$LAB_SM/.claude/.checkpoint-ready"      # the old, unsigned shared marker
+[ "$(_sm)" = allow ] || SM_PROBLEMS="$SM_PROBLEMS,the-pre-migration-fallback-was-locked-out"
+printf 'OTHER-9\n' > "$LAB_SM/.claude/.checkpoint-ready"
+[ "$(_sm)" = block ] || SM_PROBLEMS="$SM_PROBLEMS,a-shared-marker-naming-another-session-waved-us-through"
+printf 'MINE-1\n' > "$LAB_SM/.claude/.checkpoint-ready"
+[ "$(_sm)" = allow ] || SM_PROBLEMS="$SM_PROBLEMS,our-own-fallback-marker-was-refused"
+touch "$LAB_SM/.claude/.checkpoint-ready.MINE-1"
+[ "$(_sm)" = allow ] || SM_PROBLEMS="$SM_PROBLEMS,our-own-per-session-marker-was-refused"
+[ -z "$SM_PROBLEMS" ] && ok "the shared marker passes when it is ours or unsigned, never when it names another" \
+  || bad "the shared-marker fallback is a free pass" "${SM_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
 echo "integrity: a stale manifest is caught, and the recipe carries it to a foreign install"

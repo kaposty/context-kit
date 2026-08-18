@@ -39,7 +39,7 @@ Nothing may be stale. Work the phases in order, each one is a quality gate:
      is not done.
 7. Write the freshness marker, and it is PER SESSION: the session-start block named the path
    on a line beginning `Checkpoint marker for this session:`. Write that file
-   (`.claude/.checkpoint-ready.<session id>`), falling back to `.claude/.checkpoint-ready`
+   (`.claude/.checkpoint-ready.<session id>`), falling back to `echo <session id> > .claude/.checkpoint-ready`
    only if the path is nowhere to be found, and say so if you fall back. Never invent an id
    or take one from a restored ledger, it belongs to another session. Only AFTER phases 1
    through 6, never as the first step.

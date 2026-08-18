@@ -109,6 +109,32 @@ TRANSCRIPTS="$(find_transcripts)"
 GIT_LOG="$(git log --format='%h|%aI|%s' -n 200 2>/dev/null)"
 GIT_DIRTY="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+# IS THE TREE WE ARE MEASURING THE CURRENT ONE? Everything below reads the local checkout, and
+# a checkout that is behind its upstream produces facts that are false without looking it.
+# Measured in a real project on 2026-08-18: a detached HEAD 32 commits back made the digest
+# report "no commits in window" while 24 commits sat on the upstream inside that window, and
+# call a carrier file unsaved that had been written an hour earlier. Two lines in the voice of
+# a measurement, both wrong, in a report whose only promise is facts.
+#
+# The tree is NOT swapped for the upstream: the local checkout is what the session worked in,
+# and measuring somewhere else would answer a different question. It is declared instead, the
+# same way every other bound in here is declared, so the briefing carries the caveat.
+GIT_UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"
+GIT_BEHIND=""
+if [ -n "$GIT_UPSTREAM" ]; then
+  GIT_BEHIND="$(git rev-list --count "HEAD..$GIT_UPSTREAM" 2>/dev/null)"
+else
+  # A detached HEAD has no upstream at all, which is exactly the shape the field hit. Fall back
+  # to the default remote branch so the case that caused this is the one that is covered.
+  for _r in origin/HEAD origin/main origin/master; do
+    _t="$(git rev-parse --verify --quiet "$_r" 2>/dev/null)" || continue
+    [ -n "$_t" ] || continue
+    GIT_UPSTREAM="$(git rev-parse --abbrev-ref "$_r" 2>/dev/null)"
+    GIT_BEHIND="$(git rev-list --count "HEAD..$_r" 2>/dev/null)"
+    break
+  done
+fi
+case "${GIT_BEHIND:-0}" in ''|*[!0-9]*|0) GIT_BEHIND="" ;; esac
 
 # The file list travels as an environment variable, not on stdin: python3 reads the program
 # itself from stdin here, so a pipe would be swallowed by the heredoc and arrive empty.
@@ -118,6 +144,8 @@ export BRIEF_WINDOW_ARG="$WINDOW_ARG"
 export BRIEF_GIT_LOG="$GIT_LOG"
 export BRIEF_GIT_DIRTY="$GIT_DIRTY"
 export BRIEF_GIT_BRANCH="$GIT_BRANCH"
+export BRIEF_GIT_BEHIND="$GIT_BEHIND"
+export BRIEF_GIT_UPSTREAM="$GIT_UPSTREAM"
 export BRIEF_LEDGER="$LEDGER"
 export BRIEF_PROJECT_STATE="$PROJECT_STATE"
 export BRIEF_HOOK_LOG="$HOOK_LOG"
@@ -381,7 +409,11 @@ blocks.append(("WINDOW", "\n".join([
     # What was actually read, so a bound is visible as a number and not only as a note.
     "read: %d entries from %d of %d transcript file(s)" % (len(entries), files_read, len(files)),
 ] + (["NOTE: read was bounded, %s. Say so in the briefing." % "; ".join(bounds)] if bounds else [])
-  + (["NOTE: no transcript for this directory was found, the transcript half is empty."] if not files else []))))
+  + (["NOTE: no transcript for this directory was found, the transcript half is empty."] if not files else [])
+  + (["NOTE: this working tree is %s commit(s) behind %s, so the GIT and CARRIERS facts below "
+      "describe an older state than the branch. Say so in the briefing."
+      % (os.environ.get("BRIEF_GIT_BEHIND"), os.environ.get("BRIEF_GIT_UPSTREAM") or "its upstream")]
+     if os.environ.get("BRIEF_GIT_BEHIND") else []))))
 
 git_lines = []
 for row in (os.environ.get("BRIEF_GIT_LOG") or "").split("\n"):
