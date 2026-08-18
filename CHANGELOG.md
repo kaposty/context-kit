@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0 (2026-08-18)
+
+- **A directory carried exactly one ledger, and settling ownership turned that into a dead
+  end.** The path was hardcoded in all four hooks and had no variable among fifteen. Measured
+  in a working copy running five concurrent sessions: once the owner had stamped the ledger,
+  the other four had nowhere at all to put their reasoning, and every route the ownership
+  block offers was closed to them, since claiming it would be theft and archiving it would
+  delete somebody else's work. `SESSION_LEDGER_FILE` gives each session its own carrier. All
+  four hooks read it, unset behaves exactly as before, and a separate git worktree per session
+  remains the recommendation, because it separates everything rather than only the carrier.
+  The size warning names the file when it is not the default, since with several carriers in
+  one directory "the session ledger" identifies nothing.
+
+- **Two checks stood down without saying so.** The shadow check and the double-wiring check
+  both need a second reference point on the machine, so both are gated on where the hook runs
+  from and stand down when it is the project's own copy under `.claude/hooks`, which is the
+  majority shape. That is correct, and it was invisible. Measured on 2026-08-18: two sessions
+  compared notes on a field run, saw four checks stay quiet, and both got the tally wrong in
+  opposite directions, because silence that means "passed" and silence that means "could not
+  apply here" look identical in a log. They are logged as their own result now. The same run
+  showed the integrity check is self-referential in a copied tree, verifying the copy against
+  the manifest beside it, which is the limit the checker already states in its own header.
+- The `_session:` line in the unsigned-ledger block ran to 110 characters against the ~88 the
+  surrounding paragraph is set to, because the id was inlined into a line that was already
+  near the limit. It sits on its own indented line now. Cosmetic, found in a field run of
+  1.3.0, and held back from a release of its own rather than spending a tag and five
+  installation updates on a line break.
+
 ## 1.3.1 (2026-08-18)
 
 - **Updating an installation left mess in the adopter's repository, and the kit caused it.**

@@ -5,7 +5,7 @@ by Mats Kaposty
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](#install-as-a-claude-code-plugin)
 [![Tests](https://img.shields.io/github/actions/workflow/status/kaposty/context-kit/test.yml?label=tests)](https://github.com/kaposty/context-kit/actions/workflows/test.yml)
-[![Verification](https://img.shields.io/badge/verification-86%20assertions-blue)](#verify-then-prove)
+[![Verification](https://img.shields.io/badge/verification-88%20assertions-blue)](#verify-then-prove)
 
 **Ledger · Checkpoint · Guardrail**
 
@@ -78,7 +78,7 @@ session-start block becomes visible text instead of a suppressed result. So the 
 almost nothing" promise below holds with `python3` present. No Windows support outside WSL.
 
 Measured on both: macOS with the bash 3.2 it still ships, and Ubuntu 24.04 with bash 5.2 and
-Python 3.12 on arm64, 86 of 86 green in each. Both matter for a real reason: `stat -f %m` is
+Python 3.12 on arm64, 88 of 88 green in each. Both matter for a real reason: `stat -f %m` is
 mtime on BSD and mount point on GNU, and that difference shipped a silent defect once.
 
 ## Install (as a Claude Code plugin)
@@ -268,6 +268,23 @@ files from two backup directories sat tracked in git, beside three markers and t
 because nothing had ever said anything about `.claude/`. See **updating an installation**
 below for where those come from.
 
+**Several sessions in one working copy.** A directory carries one ledger, and that is the
+shape this kit is built around. If you run more than one session in the same checkout, give
+each its own **git worktree**: that separates everything, not only the carrier, and it is the
+answer this kit recommends. Where restructuring is not on the table, point each session at its
+own carrier instead:
+
+```bash
+SESSION_LEDGER_FILE=.claude/ledger-<what-this-session-is-for>.md claude
+```
+
+All four hooks read it, and unset behaves exactly as it always did. Set it once in
+`.claude/settings.json` and every session shares one file again, which is the default and not
+an improvement, so it belongs in the shell that starts the session. This exists because of a
+measured dead end: in a working copy with five concurrent sessions, once the ownership check
+settled who the one ledger belonged to, the other four had nowhere at all to put their
+reasoning, and claiming or archiving it would each have destroyed somebody else's work.
+
 **Updating an installation.** Re-run the copy block above, and keep a backup first, because
 a file you adopted on purpose is about to be overwritten by the shipped one. Put it beside
 what it backs up, under the name the ignore list covers, and it stays out of your history:
@@ -311,12 +328,12 @@ taking that path in the first place.
 Two different questions, and most tools only answer the first.
 
 ```bash
-bash tests/run.sh    # 86 assertions over the renderer, the hooks and the tools
+bash tests/run.sh    # 88 assertions over the renderer, the hooks and the tools
 ```
 
 That proves the **mechanics**: the parts behave, the budget holds, the canary is never
 printed over a damaged restore. Run it against the commit before the release shaping and many
-go red, so the net can actually fail. One of the 86 is aimed at the suite itself: a checker
+go red, so the net can actually fail. One of the 88 is aimed at the suite itself: a checker
 that dies must go red, not silently green, which is how a broken check once passed while
 measuring nothing.
 

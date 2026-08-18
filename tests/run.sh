@@ -2301,6 +2301,109 @@ grep -q 'kit-backup' "$KIT/README.md" 2>/dev/null \
   || bad "an update leaves untracked mess in the adopter's repository" "${BACKUP_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
+echo "integrity: a check that cannot run in this layout says so in the log"
+# NO SILENT CAPS. Two checks here need a second reference point on the machine and are gated
+# on where this hook runs from: the shadow check and the double-wiring check both stand down
+# when the hook is the project's own copy under .claude/hooks, which is the majority shape.
+# That is correct, and until now it was invisible. Measured on 2026-08-18: a session ran a
+# field test, saw four checks stay quiet, and had to read the source to work out which of them
+# had passed and which had never run. It got the tally wrong in one direction and this end got
+# it wrong in the other, which is two people guessing about a fact the hook already knows.
+#
+# Silence that means "passed" and silence that means "not applicable" are different results,
+# and a log that conflates them turns every future field report into source reading.
+LAB_NA="$TMP/lab-notapplicable"
+rm -rf "$LAB_NA"; mkdir -p "$LAB_NA/proj/.claude/hooks" "$LAB_NA/cache/hooks" "$LAB_NA/cfg"
+for d in "$LAB_NA/proj/.claude/hooks" "$LAB_NA/cache/hooks"; do
+  cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/ledger_render.py" "$KIT/hooks/kit_integrity.py" "$d/"
+done
+printf '# L\n\n## TASK\nx\n' > "$LAB_NA/proj/.claude/session-ledger.md"
+_na_log() {   # args: script path -> the hook log after one run
+  rm -f "$LAB_NA/proj/.claude/log/session-ledger-hook.log"
+  (cd "$LAB_NA/proj" && echo '{"source":"startup","session_id":"S1"}' \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_NA/cfg" bash "$1" >/dev/null 2>&1)
+  cat "$LAB_NA/proj/.claude/log/session-ledger-hook.log" 2>/dev/null
+}
+NA_PROBLEMS=""
+case "$(_na_log "$LAB_NA/proj/.claude/hooks/session-start-prime.sh")" in
+  *"not applicable"*) : ;;
+  *) NA_PROBLEMS="$NA_PROBLEMS,silent-about-the-two-checks-that-stood-down" ;;
+esac
+# Running from outside the project is where both DO apply, so the note must not appear.
+case "$(_na_log "$LAB_NA/cache/hooks/session-start-prime.sh")" in
+  *"not applicable"*) NA_PROBLEMS="$NA_PROBLEMS,claims-not-applicable-where-the-checks-do-run" ;;
+esac
+[ -z "$NA_PROBLEMS" ] && ok "not-applicable is logged as its own result, never as silence" \
+  || bad "a check that stood down is indistinguishable from one that passed" "${NA_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "ledger: the carrier has a path, and all four hooks agree on it"
+# REPORTED FROM THE FIELD ON 2026-08-18, and it is the last open edge of the ownership work.
+# Settling WHO a ledger belongs to only helps if everybody else has somewhere to go. The path
+# was hardcoded in all four hooks and there was no variable for it among fifteen, so a
+# directory carries exactly one ledger. Measured in a project running five sessions in one
+# working copy: once the owner stamped it, the other four had no place at all for their
+# reasoning, and all three offers in the block were dead ends for them. Claiming it would be
+# theft, archiving it would delete somebody elses work, and doing nothing leaves their own
+# chain unsaved.
+#
+# A separate worktree per session remains the recommendation and is the better answer, because
+# it gives each session its own everything. This is for the case where restructuring is not on
+# the table. Additive and fail-safe: unset behaves exactly as before, and a path set once in
+# settings.json puts everyone back on one file, which is today rather than something worse.
+LAB_LP="$TMP/lab-ledgerpath"
+rm -rf "$LAB_LP"; mkdir -p "$LAB_LP/.claude/hooks" "$LAB_LP/cfg"
+cp "$KIT/hooks/session-start-prime.sh" "$KIT/hooks/session-start-reinject.sh" \
+   "$KIT/hooks/ledger-lint.sh" "$KIT/hooks/ledger_render.py" "$LAB_LP/.claude/hooks/"
+ALT=".claude/ledger-dashboard.md"
+printf '# Mine\n\n## TASK\nZX-PATH-OK carrier under a custom path\n\n## DECIDED\n- a\n' > "$LAB_LP/$ALT"
+printf '# Theirs\n\n## TASK\nthe default carrier nobody should read here\n' > "$LAB_LP/.claude/session-ledger.md"
+_lp() {   # args: hook, stdin json -> output
+  (cd "$LAB_LP" && printf '%s' "$2" \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_LP/cfg" \
+          SESSION_LEDGER_KIT_INTEGRITY=off SESSION_LEDGER_FILE="$ALT" \
+      bash ".claude/hooks/$1" 2>/dev/null)
+}
+LP_PROBLEMS=""
+case "$(_lp session-start-prime.sh '{"source":"startup","session_id":"S1"}')" in
+  *ZX-PATH-OK*) : ;; *) LP_PROBLEMS="$LP_PROBLEMS,prime-ignored-the-path" ;;
+esac
+case "$(_lp session-start-reinject.sh '{"source":"compact","session_id":"S1"}')" in
+  *ZX-PATH-OK*) : ;; *) LP_PROBLEMS="$LP_PROBLEMS,reinject-ignored-the-path" ;;
+esac
+# The lint judges size, so point it at a carrier that is over the limit and see which file it
+# is talking about. A lint reading the wrong file would report the wrong project.
+python3 -c 'open("'"$LAB_LP/$ALT"'","a").write("\n- ZX-PATH-OK padding\n" + "x"*9000)'
+case "$(_lp ledger-lint.sh '{"session_id":"S1"}')" in
+  *ledger-dashboard*) : ;; *) LP_PROBLEMS="$LP_PROBLEMS,lint-ignored-or-did-not-name-the-path" ;;
+esac
+# And it must not start naming the file in the default case, where it would be noise.
+python3 -c 'open("'"$LAB_LP/.claude/session-ledger.md"'","a").write("\n" + "x"*9000)'
+case "$(cd "$LAB_LP" && printf '{"session_id":"S1"}' | bash .claude/hooks/ledger-lint.sh 2>/dev/null)" in
+  *session-ledger.md*) LP_PROBLEMS="$LP_PROBLEMS,names-the-path-even-when-it-is-the-default" ;;
+esac
+# The guard decides on the carrier too, and it REFUSES ON STDERR: a helper that keeps only
+# stdout reads every refusal as a pass, which is a mistake this suite has already made once.
+cp "$KIT/hooks/precompact-guard.sh" "$LAB_LP/.claude/hooks/"
+rm -f "$LAB_LP/.claude/.checkpoint-ready"*
+GUARD_OUT="$( (cd "$LAB_LP" && printf '{"trigger":"manual","session_id":"S1"}' \
+  | env SESSION_LEDGER_FILE="$ALT" bash .claude/hooks/precompact-guard.sh) 2>&1 )"
+case "$GUARD_OUT" in
+  *"no checkpoint"*) : ;;
+  *) LP_PROBLEMS="$LP_PROBLEMS,guard-did-not-refuse-an-unprepared-custom-carrier" ;;
+esac
+# Unset must behave exactly as it always did, or this knob is a migration and not an addition.
+DEFAULT_OUT="$(cd "$LAB_LP" && printf '%s' '{"source":"startup","session_id":"S1"}' \
+  | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_LP/cfg" SESSION_LEDGER_KIT_INTEGRITY=off \
+    bash .claude/hooks/session-start-prime.sh 2>/dev/null)"
+case "$DEFAULT_OUT" in
+  *"the default carrier nobody should read here"*) : ;;
+  *) LP_PROBLEMS="$LP_PROBLEMS,unset-no-longer-reads-the-default" ;;
+esac
+[ -z "$LP_PROBLEMS" ] && ok "all four hooks read the carrier path, and unset is unchanged" \
+  || bad "the carrier path is not honoured everywhere" "${LP_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "ledger: a ledger nobody signed is not silently adopted"
 # REPORTED FROM THE FIELD ON 2026-08-18. A session was handed another session's decisions,
 # open questions and measurements as its own, and the foreignness check logged foreign=0 the

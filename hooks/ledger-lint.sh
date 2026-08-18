@@ -65,7 +65,8 @@ set -uo pipefail
 
 [ "${SESSION_LEDGER_LINT:-on}" = "off" ] && exit 0
 
-LEDGER=".claude/session-ledger.md"
+# The carrier path, see session-start-prime.sh for why this is a variable.
+LEDGER="${SESSION_LEDGER_FILE:-.claude/session-ledger.md}"
 STATE=".claude/.ledger-lint-state"
 MARKER=".claude/.checkpoint-ready"
 TSTATE=".claude/.checkpoint-trigger-state"
@@ -263,7 +264,13 @@ _log "WARN (${LINES} lines, ${CHARS} chars, extra:${EXTRA:-none})"
 # on top. The reasoning behind the rules stayed in this file, where it costs nothing; what
 # goes to the model is the finding and the remedy. The tolerance band above is what keeps
 # this from becoming a character-counting game, so the text no longer has to argue about it.
-_say "Session ledger is over its limits:${PROBLEMS}"
+# NAME THE FILE WHEN IT IS NOT THE ONLY ONE IT COULD BE. With SESSION_LEDGER_FILE a single
+# directory can hold several carriers, and "the session ledger" then identifies nothing. Silent
+# about the path in the default case, where naming it would be noise on every warning.
+case "$LEDGER" in
+  ".claude/session-ledger.md") _say "Session ledger is over its limits:${PROBLEMS}" ;;
+  *)                           _say "Session ledger \`$LEDGER\` is over its limits:${PROBLEMS}" ;;
+esac
 _say ""
 # WHOSE LEDGER IS THIS. The instruction below asks for content to be DELETED, silently and
 # without mentioning it. Pointed at a ledger another session is keeping, an obedient model

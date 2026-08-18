@@ -46,7 +46,18 @@
 
 set -uo pipefail
 
-LEDGER=".claude/session-ledger.md"
+# THE CARRIER HAS A PATH, AND IT IS A VARIABLE. A directory used to carry exactly one ledger,
+# which is right for the shape this kit is built around and wrong for a working copy where
+# several sessions run at once. Reported from the field on 2026-08-18: once ownership was
+# settled and the owner had stamped it, the other four sessions in that directory had nowhere
+# at all to put their reasoning, and all three offers in the ownership block were dead ends
+# for them. Claiming it would be theft, archiving it would delete somebody elses work, doing
+# nothing leaves their own chain unsaved.
+#
+# A separate worktree per session is still the better answer and stays the recommendation,
+# because it gives each session its own everything rather than only its own carrier. This is
+# for the case where restructuring is not on the table. Unset behaves exactly as before.
+LEDGER="${SESSION_LEDGER_FILE:-.claude/session-ledger.md}"
 ARCHIVE_DIR=".claude/session-ledger.archive"
 # Cap on restored content. Lower than the re-inject hook budget on purpose: this hook
 # also carries the maintenance protocol and possibly the task check, and all of it shares
@@ -270,7 +281,13 @@ if [ "${SESSION_LEDGER_KIT_INTEGRITY:-on}" != "off" ] && command -v python3 >/de
     # partial copy did not include. The check above cannot see this either: it verified the
     # plugin cache against the manifest sitting next to it, which is always clean.
     case "${_SELF_DIR:-}" in
-      "$PWD/.claude/hooks"|".claude/hooks"|"") ;;   # the copy IS the installation, nothing shadows it
+      # A RESULT, NOT A SILENCE. This check needs a second reference on the machine, so it
+      # stands down when this hook IS the project copy, which is the majority shape. Until it
+      # said so, two sessions comparing notes on a field run both got the tally wrong: silence
+      # that means "passed" and silence that means "could not apply here" look identical in a
+      # log, and the difference is the whole value of the run.
+      "$PWD/.claude/hooks"|".claude/hooks"|"")
+        _log "shadow check not applicable (this hook is the project copy, no second reference)" ;;
       *)
         SHADOW="$(python3 "$INTEGRITY_PY" "$KIT_ROOT" --shadow . 2>/dev/null)"
         case $? in
@@ -335,7 +352,8 @@ fi
 # and a false alarm there would fire for most users and teach them to ignore the report.
 if [ "${SESSION_LEDGER_DOUBLE_WIRE_CHECK:-on}" != "off" ] && [ ! -f ".claude-plugin/plugin.json" ]; then
   case "${_SELF_DIR:-}" in
-    "$PWD/.claude/hooks"|".claude/hooks"|"") ;;   # one wiring, and it is this one
+    "$PWD/.claude/hooks"|".claude/hooks"|"")   # one wiring, and it is this one
+      _log "double-wiring check not applicable (this hook is the project copy)" ;;
     *)
       _DOUBLE=""; _DCOUNT=0
       for _f in ".claude/settings.json" ".claude/settings.local.json" \
@@ -521,9 +539,12 @@ if [ "$KEPT" -eq 1 ]; then
       _add ""
       _add "**Task check (first turn, before appending anything):** this ledger is **not signed**,"
       _add "so nothing here can tell whose it is. Read \`## TASK\` above and compare it with what"
-      _add "you have actually been asked to do. If it matches, claim the ledger by writing"
-      _add "\`_session: ${SESSION_ID}_\` into its header, and it stops being ambiguous for"
-      _add "everyone after you. If it does NOT match, it belongs to another task: carry its"
+      _add "you have actually been asked to do. If it matches, claim the ledger by writing this"
+      _add "line into its header, and it stops being ambiguous for everyone after you:"
+      _add ""
+      _add "    _session: ${SESSION_ID}_"
+      _add ""
+      _add "If it does NOT match, it belongs to another task: carry its"
       _add "decisions and dropped paths into the project state file (\`## PLAN\` names it), then"
       _add "archive it before you write anything of your own:"
       _add ""

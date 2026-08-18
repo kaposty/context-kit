@@ -44,7 +44,8 @@ set -uo pipefail
 # markers behind, four of them inside five minutes. Both session-start hooks therefore name
 # the exact path, and the block text below repeats it.
 MARKER_SHARED=".claude/.checkpoint-ready"
-LEDGER=".claude/session-ledger.md"
+# The carrier path, see session-start-prime.sh for why this is a variable.
+LEDGER="${SESSION_LEDGER_FILE:-.claude/session-ledger.md}"
 # WHERE THE RENDERER LIVES. Resolved next to this script first, with the classic install
 # path as fallback. The hardcoded ".claude/hooks/..." was a silent bottleneck: install the
 # hooks anywhere else, which is exactly what a plugin install does

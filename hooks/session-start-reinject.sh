@@ -28,7 +28,8 @@
 
 set -uo pipefail
 
-LEDGER=".claude/session-ledger.md"
+# The carrier path, see session-start-prime.sh for why this is a variable.
+LEDGER="${SESSION_LEDGER_FILE:-.claude/session-ledger.md}"
 # Well under the 10k hook cap, leaving room for other hooks. Minus the fixed preamble
 # this leaves 6550 for the body, which is MORE than the prime hook's 6000, so prime is
 # the binding constraint the ledger-lint limit is pinned to, not this number.
