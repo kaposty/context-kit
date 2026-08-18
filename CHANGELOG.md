@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.1 (2026-08-18)
+
+- **Following the documentation could wire the kit twice.** The two install paths are written
+  as alternatives and nothing said they are exclusive, so somebody who already has the plugin,
+  here or at user scope, and then runs the standalone block ends up with both. Measured by
+  following this page: every hook fires twice and the restore is placed in the context twice,
+  against a budget meant to cap it once. It is not an error, both copies exit 0, and that is
+  what makes it expensive, because nothing looks wrong. The kit has reported the doubling at
+  session start since 1.2.0, and a report after the fact is second best; the recipe now rules
+  it out before it copies, with the one command that shows an existing install.
+
 ## 1.5.0 (2026-08-18)
 
 - **The carrier path from 1.4.0 was unreachable for the case that motivated it.** Sessions

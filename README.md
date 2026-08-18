@@ -5,7 +5,7 @@ by Mats Kaposty
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](#install-as-a-claude-code-plugin)
 [![Tests](https://img.shields.io/github/actions/workflow/status/kaposty/context-kit/test.yml?label=tests)](https://github.com/kaposty/context-kit/actions/workflows/test.yml)
-[![Verification](https://img.shields.io/badge/verification-89%20assertions-blue)](#verify-then-prove)
+[![Verification](https://img.shields.io/badge/verification-90%20assertions-blue)](#verify-then-prove)
 
 **Ledger · Checkpoint · Guardrail**
 
@@ -78,7 +78,7 @@ session-start block becomes visible text instead of a suppressed result. So the 
 almost nothing" promise below holds with `python3` present. No Windows support outside WSL.
 
 Measured on both: macOS with the bash 3.2 it still ships, and Ubuntu 24.04 with bash 5.2 and
-Python 3.12 on arm64, 89 of 89 green in each. Both matter for a real reason: `stat -f %m` is
+Python 3.12 on arm64, 90 of 90 green in each. Both matter for a real reason: `stat -f %m` is
 mtime on BSD and mount point on GNU, and that difference shipped a silent defect once.
 
 ## Install (as a Claude Code plugin)
@@ -94,7 +94,22 @@ As a plugin, which is how Claude Code distributes this kind of thing:
 Installing from a local clone works too, and is the honest way to try it before trusting a
 remote: `/plugin marketplace add /path/to/context-kit`.
 
-Or standalone, if you would rather have the files in your project. **Look before you copy.**
+Or standalone, if you would rather have the files in your project. **The two paths are
+alternatives, not layers.** If the plugin is already installed, here or at user scope, adding
+the standalone copy on top wires everything twice: every hook fires twice and the restore is
+placed in the context twice, against a budget meant to cap it once. It is not an error, both
+copies exit 0, and that is what makes it expensive, because nothing looks wrong. Measured by
+following this page. One command rules it out:
+
+```bash
+claude plugin list | grep -A2 context-kit
+```
+
+Anything listed there means you already have it. Remove the plugin first, or stay on it and
+skip this section. From 1.2.0 the kit reports the doubling itself at session start, but that
+is a report after the fact, and this is the moment it can be avoided.
+
+**Look before you copy.**
 The kit claims the names `brief`, `checkpoint`, `prove` and `session-ledger`, which are about
 the most generic in the whole namespace, and `cp -R` overwrites a file of the same name
 without a word. This prints what would go, and changes nothing:
@@ -348,12 +363,12 @@ taking that path in the first place.
 Two different questions, and most tools only answer the first.
 
 ```bash
-bash tests/run.sh    # 89 assertions over the renderer, the hooks and the tools
+bash tests/run.sh    # 90 assertions over the renderer, the hooks and the tools
 ```
 
 That proves the **mechanics**: the parts behave, the budget holds, the canary is never
 printed over a damaged restore. Run it against the commit before the release shaping and many
-go red, so the net can actually fail. One of the 89 is aimed at the suite itself: a checker
+go red, so the net can actually fail. One of the 90 is aimed at the suite itself: a checker
 that dies must go red, not silently green, which is how a broken check once passed while
 measuring nothing.
 

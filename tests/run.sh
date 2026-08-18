@@ -2301,6 +2301,31 @@ grep -q 'kit-backup' "$KIT/README.md" 2>/dev/null \
   || bad "an update leaves untracked mess in the adopter's repository" "${BACKUP_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
+echo "release: the standalone recipe tells you to look for a plugin first"
+# MEASURED BY FOLLOWING THE DOCUMENTATION ON 2026-08-18. The two install paths are written as
+# alternatives and nothing says they are exclusive, so somebody who already has the plugin at
+# user scope and then runs the standalone block wires the kit twice, in a project that reads
+# like a fresh install. It is not an error, both hooks exit 0, and that is what makes it
+# expensive: everything looks right while every hook fires twice and the restore lands in the
+# context twice, against a budget meant to cap it once.
+#
+# The kit already reports this after the fact, since 1.2.0. Reporting is second best. The
+# recipe is where it can be avoided, and the check costs one command.
+RECIPE="$(sed -n '/^Or standalone/,/^\*\*Several sessions/p' "$KIT/README.md")"
+RECIPE_PROBLEMS=""
+case "$RECIPE" in
+  *"plugin list"*) : ;;
+  *) RECIPE_PROBLEMS="$RECIPE_PROBLEMS,the-recipe-never-checks-for-an-installed-plugin" ;;
+esac
+# And it has to say what it costs, or the command is a ritual somebody skips.
+case "$RECIPE" in
+  *twice*|*both*) : ;;
+  *) RECIPE_PROBLEMS="$RECIPE_PROBLEMS,does-not-say-what-running-both-paths-costs" ;;
+esac
+[ -z "$RECIPE_PROBLEMS" ] && ok "the standalone recipe rules out a second wiring before it copies" \
+  || bad "following the docs can wire the kit twice" "${RECIPE_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "integrity: a check that cannot run in this layout says so in the log"
 # NO SILENT CAPS. Two checks here need a second reference point on the machine and are gated
 # on where this hook runs from: the shadow check and the double-wiring check both stand down
