@@ -68,7 +68,9 @@ continuity, the second one invisibly, by archiving the ledger of an old session 
 still alive as soon as a new session opened in the same directory. What is checked now is
 ownership: the ledger carries the id of the session that wrote it, and a mismatch is restored
 **and** flagged, so the model can archive it on the first turn if the task really is a
-different one.
+different one. Both session-start hooks flag it, which sounds obvious and was not: the check
+lived only on the hook that runs at startup for four releases, while the hook that runs on
+resume, the door a working day actually uses, restored the same foreign ledger in silence.
 
 ## 3. The harness contract
 
@@ -171,7 +173,7 @@ moment the model reads the file again, which is exactly what the re-read line gu
 | Step | Done by | Type |
 |---|---|---|
 | restore the ledger, inject the protocol, flag a foreign ledger | `session-start-prime.sh` | Hook |
-| hand the ledger back after `compact` (late) or `resume` | `session-start-reinject.sh` | Hook |
+| hand the ledger back after `compact`, `resume` or `fork`, flagging a foreign one there too | `session-start-reinject.sh` | Hook |
 | **write the reasoning into the ledger** | **the model** | behaviour, not a call |
 | keep the ledger inside its budget | `ledger-lint.sh` (Stop), silently | Hook + model |
 | fire the checkpoint when work has piled up | `ledger-lint.sh` (Stop), **opt-in, off by default** | Hook + model |

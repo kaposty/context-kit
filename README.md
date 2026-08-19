@@ -328,9 +328,10 @@ once the ownership check settled who the one ledger belonged to, the other four 
 all to put their reasoning, and claiming or archiving it would each have destroyed somebody
 else's work.
 
-**Updating an installation.** Re-run the copy block above, and keep a backup first, because
-a file you adopted on purpose is about to be overwritten by the shipped one. Put it beside
-what it backs up, under the name the ignore list covers, and it stays out of your history:
+**Updating an installation.** Re-run the copy block above, and keep a backup first. A file
+listed in `.claude/.kit-adopted` is skipped by that block, but one you changed WITHOUT
+listing it is not, and that is the case the backup is for. Put it beside what it backs up,
+under the name the ignore list covers, and it stays out of your history:
 
 ```bash
 STAMP=$(date +%Y%m%d-%H%M%S)

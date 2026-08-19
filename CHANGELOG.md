@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.2 (2026-08-19)
+
+- **Documentation that 1.6.0 and 1.6.1 had just made false.** Next to the backup step the
+  README still explained that an update is about to overwrite a file you adopted on purpose,
+  which stopped being true one release earlier; the backup is still worth taking, for the
+  file you changed and never listed, and it now says that instead. The GUIDE still credited
+  the foreign-ledger flag to the startup hook alone, and named the restore hook as doing
+  nothing but handing the ledger back. Both are the shipped explanation of a mechanism that
+  had changed under them, which is the failure this kit exists to prevent, so they are
+  corrected rather than left to the next release.
+
 ## 1.6.1 (2026-08-19)
 
 - **Half of a two-clause promise was true.** Next to the install block the README says that a
