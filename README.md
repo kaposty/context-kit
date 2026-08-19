@@ -130,8 +130,16 @@ path instead, where the two live side by side under different names (`/brief` st
 # `cp -R hooks/.` looks shorter and is wrong: it also brings hooks.json, which is the plugin
 # wiring and does nothing in a standalone install, and it carries .DS_Store along. Found by
 # running this block and then the uninstall below, and seeing what stayed behind.
+# Files this project adopted on purpose are skipped, parsed the way the integrity check
+# parses them: a path per line, anything after a `#` is the reason. On a first install the
+# list does not exist and this is a no-op. On an update it is the whole difference between
+# keeping a decision and losing it without a word.
+ADOPTED="$(sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+             .claude/.kit-adopted 2>/dev/null)"
 (cd "$KIT" && find hooks skills commands tools -type f ! -name hooks.json ! -name '.DS_Store') \
-  | while read -r f; do mkdir -p ".claude/$(dirname "$f")"; cp "$KIT/$f" ".claude/$f"; done
+  | while read -r f; do
+      printf '%s\n' "$ADOPTED" | grep -qxF "$f" && continue
+      mkdir -p ".claude/$(dirname "$f")"; cp "$KIT/$f" ".claude/$f"; done
 cp "$KIT"/.kit-manifest .claude/.kit-manifest
 # Only the kit's own scripts, listed rather than globbed: `chmod +x .claude/hooks/*.sh`
 # would also change the mode of scripts that belong to your project.

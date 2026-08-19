@@ -1663,6 +1663,30 @@ if [ -n "$CHECK_B" ] && [ -n "$INST_B" ] && [ -n "$UNINST_B" ]; then
   LEFT="$(cd "$LABB" && find .claude -type f | sed 's|^\./||' | grep -v 'my-own.sh' || true)"
   [ -z "$LEFT" ] || INST_PROBLEMS="$INST_PROBLEMS,uninstall-left-$(printf '%s' "$LEFT" | tr '\n' '+' | tr -d ' ')"
   [ -f "$LABB/.claude/hooks/my-own.sh" ] || INST_PROBLEMS="$INST_PROBLEMS,uninstall-removed-a-foreign-file"
+
+  # AN UPDATE RUNS THIS SAME BLOCK, and the README promises next to it that an update "leaves
+  # alone" what a project adopted on purpose. Found here on 2026-08-19, not reported: the
+  # integrity check honours `.kit-adopted` and the copy block never read it, so exactly one
+  # half of a two-clause promise was true. Two real installations carried 16 and 10 such
+  # lines, deliberate decisions that the documented update would have replaced without a word.
+  # The format is the one the integrity check parses: a path, and the reason after a `#`.
+  LABC="$TMP/install-adopted"; rm -rf "$LABC"; mkdir -p "$LABC/.claude/hooks"
+  printf 'ZX-ADOPTED-KEEP\n' > "$LABC/.claude/hooks/ledger-lint.sh"
+  printf '# what this project took over\nhooks/ledger-lint.sh  # kept by decision\n' \
+    > "$LABC/.claude/.kit-adopted"
+  ( cd "$LABC" && KIT="$KIT" bash -c "$INST_B" ) >/dev/null 2>&1
+  grep -q ZX-ADOPTED-KEEP "$LABC/.claude/hooks/ledger-lint.sh" 2>/dev/null \
+    || INST_PROBLEMS="$INST_PROBLEMS,update-overwrote-an-adopted-file"
+  # And it still has to do its job for everything the list does NOT name, or the protection
+  # would be bought by turning the update into a no-op.
+  [ -f "$LABC/.claude/tools/brief-digest.sh" ] \
+    || INST_PROBLEMS="$INST_PROBLEMS,the-adopted-list-stopped-the-rest-of-the-copy"
+  # Without the list the same file IS replaced, or "adopted" would mean nothing at all.
+  LABD="$TMP/install-notadopted"; rm -rf "$LABD"; mkdir -p "$LABD/.claude/hooks"
+  printf 'ZX-ADOPTED-KEEP\n' > "$LABD/.claude/hooks/ledger-lint.sh"
+  ( cd "$LABD" && KIT="$KIT" bash -c "$INST_B" ) >/dev/null 2>&1
+  grep -q ZX-ADOPTED-KEEP "$LABD/.claude/hooks/ledger-lint.sh" 2>/dev/null \
+    && INST_PROBLEMS="$INST_PROBLEMS,an-unlisted-file-survived-the-update"
 fi
 [ -z "$INST_PROBLEMS" ] && INST_PROBLEMS="OK"
 [ "$INST_PROBLEMS" = "OK" ] && ok "install and uninstall do what the README says they do" \

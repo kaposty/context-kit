@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.1 (2026-08-19)
+
+- **Half of a two-clause promise was true.** Next to the install block the README says that a
+  file you adopt on purpose goes into `.claude/.kit-adopted`, that the integrity check then
+  stops reporting it, **and that an update leaves it alone instead of quietly replacing a
+  decision you made**. The first clause held: the integrity check parses that list. The second
+  did not, because the update is the same copy block as the install and the block never read
+  it, so every documented update overwrote every adopted file without a word. Found while
+  preparing to update real installations, two of which carry 16 and 10 such lines. The block
+  now skips them, parsed exactly the way the integrity check parses them, so the two cannot
+  drift apart. On a first install the list does not exist and the change is a no-op, and a
+  file the list does not name is still replaced, which is asserted in both directions.
+
 ## 1.6.0 (2026-08-19)
 
 - **The ownership verdict was missing from the door that gets used all day.** All of the
