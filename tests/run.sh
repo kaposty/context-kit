@@ -1262,6 +1262,59 @@ case "$BOUND_OUT" in *"read was bounded"*) ;; *) BOUND_PROBLEMS="$BOUND_PROBLEMS
                              || bad "the read bound is silent or absent" "$BOUND_PROBLEMS"
 
 # ---------------------------------------------------------------------------
+echo "brief: in a shared working copy every quoted line says which session it came from"
+# REPORTED FROM THE FIELD ON 2026-08-19. The digest resolves transcripts by working
+# directory, so in a copy shared by several sessions it reads ALL of them. That is right for
+# a briefing about a PERSON's day and it is not the defect. The defect is that the lines came
+# out unmarked: under YOUR MESSAGES stood messages the user had sent to OTHER sessions, in
+# one list with their own, and the reader had to re-derive per line which conversation it
+# belonged to. The budget then cut, in order, the blocks that carried the difference.
+#
+# The mark is added only when the window actually holds more than one session. A single
+# session is the ordinary case and pays nothing for a distinction it does not have.
+SHARED="$TMP/brief-shared"
+rm -rf "$SHARED"; mkdir -p "$SHARED/proj" "$SHARED/cfg/projects/synthetic"
+python3 - "$SHARED" <<'PY'
+import json, os, sys, datetime
+root = sys.argv[1]
+proj = os.path.join(root, "proj")
+now = datetime.datetime.now()
+def rec(sid, i, who, text):
+    t = (now - datetime.timedelta(minutes=90 - i)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return json.dumps({"type": who, "timestamp": t, "cwd": proj, "sessionId": sid,
+                       "message": {"role": who, "content": text if who == "user"
+                                   else [{"type": "text", "text": text}]}}) + "\n"
+for sid, tok in (("aaaa1111-0000-0000-0000-000000000000", "ZX-SESSION-A"),
+                 ("bbbb2222-0000-0000-0000-000000000000", "ZX-SESSION-B")):
+    with open(os.path.join(root, "cfg/projects/synthetic", sid + ".jsonl"), "w",
+              encoding="utf-8") as fh:
+        for i in range(30):
+            fh.write(rec(sid, i, "user", "%s asked something %d" % (tok, i)))
+            fh.write(rec(sid, i, "assistant",
+                         "%s answered at length, well past the forty characters "
+                         "the digest needs before it keeps a line %d" % (tok, i)))
+PY
+SHARED_OUT="$(cd "$SHARED/proj" && CLAUDE_CONFIG_DIR="$SHARED/cfg" \
+              SESSION_LEDGER_BRIEF_BUDGET=40000 bash "$KIT/tools/brief-digest.sh" 2>/dev/null)"
+SHARED_PROBLEMS=""
+case "$SHARED_OUT" in *"[aaaa]"*) : ;; *) SHARED_PROBLEMS="$SHARED_PROBLEMS,first-session-unmarked" ;; esac
+case "$SHARED_OUT" in *"[bbbb]"*) : ;; *) SHARED_PROBLEMS="$SHARED_PROBLEMS,second-session-unmarked" ;; esac
+# A mark nobody can read is decoration, so the digest has to say what it means.
+case "$SHARED_OUT" in *"share this working copy"*) : ;; *) SHARED_PROBLEMS="$SHARED_PROBLEMS,mark-never-explained" ;; esac
+# Both sessions still have to be THERE. A mark bought by dropping one of them would be worse
+# than the defect: the reader would lose half the day and never know it.
+case "$SHARED_OUT" in *ZX-SESSION-A*) : ;; *) SHARED_PROBLEMS="$SHARED_PROBLEMS,lost-the-first-session" ;; esac
+case "$SHARED_OUT" in *ZX-SESSION-B*) : ;; *) SHARED_PROBLEMS="$SHARED_PROBLEMS,lost-the-second-session" ;; esac
+# And a single session pays nothing.
+rm -f "$SHARED/cfg/projects/synthetic/bbbb2222-0000-0000-0000-000000000000.jsonl"
+SOLO_OUT="$(cd "$SHARED/proj" && CLAUDE_CONFIG_DIR="$SHARED/cfg" \
+            SESSION_LEDGER_BRIEF_BUDGET=40000 bash "$KIT/tools/brief-digest.sh" 2>/dev/null)"
+case "$SOLO_OUT" in *"[aaaa]"*) SHARED_PROBLEMS="$SHARED_PROBLEMS,marked-a-session-that-had-nobody-to-be-told-apart-from" ;; esac
+case "$SOLO_OUT" in *"share this working copy"*) SHARED_PROBLEMS="$SHARED_PROBLEMS,announced-a-mark-it-did-not-add" ;; esac
+[ -z "$SHARED_PROBLEMS" ] && ok "quoted lines carry their session when the copy is shared, and nothing when it is not" \
+  || bad "the digest mixes several sessions into one unmarked list" "${SHARED_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
 echo "brief: an interrupted brief does not leave the next one with an empty window"
 # Measured: a /brief was interrupted, and because the window hangs on the COMMAND and not on
 # its result, the retry four minutes later reported a correct and useless "since the last
@@ -1448,6 +1501,31 @@ mkdir -p "$PLUGTOOLS"
 printf 'echo REACHED\n' > "$PLUGTOOLS/brief-digest.sh"
 printf 'echo REACHED\n' > "$PLUGTOOLS/effect-probe.sh"
 EMPTYCFG="$TMP/resolve-nocache"; mkdir -p "$EMPTYCFG"
+# EIGHT versions in the cache, which is exactly what five releases in one day leave behind.
+# REPORTED FROM THE FIELD ON 2026-08-19 as a broken shell alias, and measured here to be the
+# larger half of the same defect: the resolver globs the cache and BREAKS on the first hit,
+# and a shell glob sorts lexically, so `1.0.0` wins over `1.5.1`. A plugin user who has ever
+# updated has been running the digest they first installed, silently, and every fix to these
+# tools since has never reached them. The oldest version therefore says WRONG here, and only
+# the newest says REACHED.
+PLUGCFG_MULTI="$TMP/resolve-plugincache-multi"
+rm -rf "$PLUGCFG_MULTI"
+python3 - "$PLUGCFG_MULTI" <<'PYCACHE'
+import os, sys
+root = sys.argv[1]
+vers = ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.3.1", "1.4.0", "1.5.0", "1.5.1"]
+for i, v in enumerate(vers):
+    d = os.path.join(root, "plugins/cache/context-kit/context-kit", v, "tools")
+    os.makedirs(d)
+    body = "echo REACHED\n" if v == vers[-1] else "echo WRONG\n"
+    for name in ("brief-digest.sh", "effect-probe.sh"):
+        open(os.path.join(d, name), "w").write(body)
+    # An update writes a new directory, so the newest version is the newest on disk. Set it
+    # explicitly rather than relying on the order these lines happen to run in: eight
+    # directories created inside one second can tie, and a tie is decided by nothing.
+    os.utime(d, (1000000 + i * 1000, 1000000 + i * 1000))
+    os.utime(os.path.dirname(d), (1000000 + i * 1000, 1000000 + i * 1000))
+PYCACHE
 for f in skills/brief/SKILL.md commands/brief.md commands/prove.md; do
   case "$f" in
     *prove*) SCRIPT="effect-probe.sh"; OTHER="brief-digest.sh"; TAIL='; bash "$P"' ;;
@@ -1464,7 +1542,7 @@ for f in skills/brief/SKILL.md commands/brief.md commands/prove.md; do
     RESOLVE_PROBLEMS="$RESOLVE_PROBLEMS,$f-has-no-resolver-line"
     continue
   fi
-  for layout in standalone delivery plugin partial; do
+  for layout in standalone delivery plugin partial plugin-stale; do
     LAB="$TMP/resolve-$(printf '%s' "$f" | tr '/.' '--')-$layout"; rm -rf "$LAB"; mkdir -p "$LAB"
     CFG="$EMPTYCFG"
     case "$layout" in
@@ -1476,6 +1554,8 @@ for f in skills/brief/SKILL.md commands/brief.md commands/prove.md; do
       # Half a copy: .claude/tools exists and holds the OTHER script. Also measured, in the
       # same project, after someone copied one file by hand to make the line work once.
       partial)    mkdir -p "$LAB/.claude/tools"; printf 'echo WRONG\n' > "$LAB/.claude/tools/$OTHER"; CFG="$PLUGCFG" ;;
+      # The same stranger, one plugin update later. Nothing else differs.
+      plugin-stale) mkdir -p "$LAB/tools"; printf 'x = 1\n' > "$LAB/tools/unrelated.py"; CFG="$PLUGCFG_MULTI" ;;
     esac
     # Separated by ";" and not by "&&" on purpose: a resolver that probes for paths reports a
     # non zero status for the ones that do not exist, and under `set -o pipefail` that status
@@ -2536,6 +2616,77 @@ _session: OTHER-9_')" in
 esac
 [ -z "$UN_PROBLEMS" ] && ok "an unsigned ledger is flagged, a signed one is judged on its stamp" \
   || bad "the ledger owner check fails open" "${UN_PROBLEMS#,}"
+
+# ---------------------------------------------------------------------------
+echo "ledger: the ownership verdict travels on the door that is used all day"
+# REPORTED FROM THE FIELD ON 2026-08-19, and reproduced in this repository's own hook log:
+#
+#   prime    source=startup keep+restore (foreign=1 unsigned=0)
+#   reinject source=resume  FIRED emit=5772b complete=1
+#
+# Two hooks in the same second. prime saw that the ledger belonged to somebody else and said
+# so; reinject handed the same ledger to the model with no verdict at all, and the foreign
+# TASK stood in that session's context twice with nothing marking it as not its own.
+#
+# The cause is a split of duties nobody checked against the traffic: ALL of the owner logic
+# lived in prime, and prime only runs on startup|clear. reinject covers compact, resume and
+# fork, which is the door a working day actually uses, and it carried none of it.
+#
+# FOREIGN only, deliberately. An unsigned ledger names nobody to be wrong about, and warning
+# here would fire on every resume of every ledger that was never stamped, which is most of
+# them. That case stays with prime, where the claim instruction already lives.
+#
+# ANCHORED ON THE LOG FIELD AND ON THE OWNER ID, NOT ON THE SENTENCE. Four assertions in this
+# suite once grepped the prose of a warning, so improving a sentence turned them red with no
+# change in behaviour. What is actually required is that the hook NOTICES (a machine field in
+# the log), that it NAMES the owner (a verdict that withholds the name is useless), and that
+# it does both BEFORE the body. The wording is free to change.
+LAB_RJ="$TMP/lab-reinject-owner"
+rm -rf "$LAB_RJ"; mkdir -p "$LAB_RJ/.claude/hooks" "$LAB_RJ/cfg"
+cp "$KIT/hooks/session-start-reinject.sh" "$KIT/hooks/ledger_render.py" "$LAB_RJ/.claude/hooks/"
+RJ_OUT=""; RJ_LOG=""
+_rj_run() {   # args: stamp line, source -> payload in RJ_OUT, last log line in RJ_LOG
+  rm -f "$LAB_RJ/.claude/log/session-ledger-hook.log"
+  printf '# Session Ledger\n%s\n\n## TASK\nZX-RJ-OK somebody elses contract work\n\n## DECIDED\n- a decision worth keeping\n' \
+    "$1" > "$LAB_RJ/.claude/session-ledger.md"
+  RJ_OUT="$( ( cd "$LAB_RJ" && printf '{"source":"%s","session_id":"MINE-1"}' "$2" \
+    | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_RJ/cfg" \
+          SESSION_LEDGER_KIT_INTEGRITY=off \
+      bash .claude/hooks/session-start-reinject.sh ) 2>/dev/null )"
+  RJ_LOG="$(tail -1 "$LAB_RJ/.claude/log/session-ledger-hook.log" 2>/dev/null)"
+}
+RJ_PROBLEMS=""
+for RJ_SRC in compact resume fork; do
+  _rj_run '_session: OTHER-9_' "$RJ_SRC"
+  case "$RJ_LOG" in *foreign=1*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,${RJ_SRC}-did-not-notice" ;; esac
+  case "$RJ_OUT" in *OTHER-9*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,${RJ_SRC}-did-not-name-the-owner" ;; esac
+done
+# FAIL-OPEN. It names the owner, it does not withhold the restore: a session that has taken
+# the work over needs the reasoning, and one that has not needs to know whose it is. Refusing
+# would turn an attribution problem into a lost-context problem, which is strictly worse.
+case "$RJ_OUT" in *ZX-RJ-OK*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,the-verdict-swallowed-the-restore" ;; esac
+# And it has to stand BEFORE the body. A note under four thousand characters of somebody
+# else's task is read after the contamination it warns about.
+case "${RJ_OUT%%ZX-RJ-OK*}" in
+  *OTHER-9*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,the-verdict-came-after-the-body" ;;
+esac
+# A ledger this session signed costs nothing at all.
+_rj_run '_session: MINE-1_' resume
+case "$RJ_LOG" in *foreign=0*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,judged-our-own-ledger-foreign" ;; esac
+# An unsigned one stays prime's case, or every resume of every unstamped ledger nags.
+_rj_run '_started: 2026-08-15T19:53:48+02:00_' resume
+case "$RJ_LOG" in *foreign=0*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,nagged-about-an-unstamped-ledger" ;; esac
+# With no id there is nobody to compare against, so it decides nothing rather than guessing.
+rm -f "$LAB_RJ/.claude/log/session-ledger-hook.log"
+( cd "$LAB_RJ" && printf '{"source":"resume"}' \
+  | env DISABLE_AUTO_COMPACT=true CLAUDE_CONFIG_DIR="$LAB_RJ/cfg" \
+        SESSION_LEDGER_KIT_INTEGRITY=off \
+    bash .claude/hooks/session-start-reinject.sh ) >/dev/null 2>&1
+case "$(tail -1 "$LAB_RJ/.claude/log/session-ledger-hook.log" 2>/dev/null)" in
+  *foreign=0*) : ;; *) RJ_PROBLEMS="$RJ_PROBLEMS,guessed-a-verdict-without-an-id" ;;
+esac
+[ -z "$RJ_PROBLEMS" ] && ok "a restore on compact, resume or fork names a ledger that belongs to somebody else" \
+  || bad "the restore path adopts a foreign ledger in silence" "${RJ_PROBLEMS#,}"
 
 # ---------------------------------------------------------------------------
 echo "guard: the shared marker is a fallback, not a free pass for anyone"

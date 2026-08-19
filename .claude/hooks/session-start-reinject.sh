@@ -82,9 +82,38 @@ esac
 
 [ -s "$LEDGER" ] || { _log "no-op (no ledger, or empty)"; exit 0; }
 
+# THE OWNER VERDICT HAS TO TRAVEL THIS PATH TOO. Reported from the field on 2026-08-19 and
+# reproduced in this project's own log: all of the attribution logic sat in the prime hook,
+# which runs on startup|clear, while this one covers compact, resume and fork, the door a
+# working day actually uses. Both fired in the same second, prime logging foreign=1 and this
+# hook restoring the very same ledger with nothing said, so another session's TASK stood in
+# the model's context twice with no sign that it was not its own.
+#
+# FOREIGN ONLY, and that is a decision rather than an omission. An unsigned ledger names
+# nobody to be wrong about, and a warning here would fire on every resume of every ledger
+# that was never stamped, which is most of them. That case stays with prime, where the claim
+# instruction already lives and where it costs no budget.
+FOREIGN=0
+# Same parse as prime: the stamp may carry a human readable suffix after the id
+# (`_session: <uuid> (Manager, Desktop)_`), so the first field is the id and the rest is not.
+OWNER="$(sed -n 's/^_session: \(.*\)_$/\1/p' "$LEDGER" 2>/dev/null | head -1 | awk '{print $1}')"
+if [ -n "$SESSION_ID" ] && [ -n "$OWNER" ] && [ "$OWNER" != "$SESSION_ID" ]; then FOREIGN=1; fi
+
+# Built here and not at the point of use, because its length has to come off the body budget
+# below. A verdict that pushes the payload past the harness cap would be paid for by cutting
+# the reasoning it is warning about.
+VERDICT=""
+if [ "$FOREIGN" -eq 1 ]; then
+  VERDICT="> **This ledger is signed by a different session** (\`${OWNER}\`, and this session
+> is \`${SESSION_ID}\`). It is restored anyway: you may have taken the work over, and losing
+> the reasoning is worse than reading somebody else's. Until you have, read \`## TASK\` below
+> as somebody else's and do not append to, trim or archive the file. If the work IS yours,
+> take the ledger over by setting its \`_session:\` line to this session's id."
+fi
+
 # The preamble and canary printed around the body count against the same output cap,
 # so the body gets the budget minus that fixed overhead.
-BODY_BUDGET=$(( BUDGET - 450 ))
+BODY_BUDGET=$(( BUDGET - 450 - ${#VERDICT} ))
 
 BODY=""
 RC=1
@@ -114,7 +143,7 @@ fi
 [ -n "${BODY// /}" ] || { _log "no-op (empty body)"; exit 0; }
 
 SIZE=${#BODY}
-_log "FIRED emit=${SIZE}b complete=${COMPLETE}"
+_log "FIRED emit=${SIZE}b complete=${COMPLETE} foreign=${FOREIGN}"
 
 PAYLOAD=""
 _add() { PAYLOAD="${PAYLOAD}${1}
@@ -137,6 +166,7 @@ _add ""
 _add "> Reasoning carried across the summary. Mechanical state (branch, open PRs,"
 _add "> todos, build status) is deliberately NOT here: re-derive it if you need it."
 _add ""
+[ -n "$VERDICT" ] && { _add "$VERDICT"; _add ""; }
 _add "$BODY"
 
 # THE CANARY IS A VERDICT, NOT A DECORATION. The project instruction file keys off it:

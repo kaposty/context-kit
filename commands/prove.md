@@ -11,7 +11,7 @@ Work these steps and report honestly, including a red result.
 First resolve the install once, so no step has to guess where the script lives:
 
 ```bash
-for d in .claude/tools tools "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools; do [ -f "$d/effect-probe.sh" ] && { P="$d/effect-probe.sh"; break; }; done
+for d in .claude/tools tools "$(ls -dt "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools 2>/dev/null | head -1)"; do [ -f "$d/effect-probe.sh" ] && { P="$d/effect-probe.sh"; break; }; done
 ```
 
 Every `$P` below is that path. If the loop leaves `$P` empty, the kit is not installed where

@@ -41,7 +41,7 @@ on screen, and it dies when you have read it. That is why it stores nothing.
 Run the digest, from the project root, exactly like this:
 
 ```bash
-for d in .claude/tools tools "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools; do [ -f "$d/brief-digest.sh" ] && { bash "$d/brief-digest.sh"; break; }; done
+for d in .claude/tools tools "$(ls -dt "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/context-kit/*/tools 2>/dev/null | head -1)"; do [ -f "$d/brief-digest.sh" ] && { bash "$d/brief-digest.sh"; break; }; done
 ```
 
 The line resolves the install itself, which is the point of writing it out. Naming one path
@@ -51,7 +51,12 @@ and a wrong-path error, on a standalone install. It tests for the FILE and not f
 directory, because a project that keeps its own `tools/` or half a copy under
 `.claude/tools/` otherwise wins the lookup and the call dies with exit 127: measured twice in
 a real project, days apart. `CLAUDE_CONFIG_DIR` and not `CLAUDE_PLUGIN_ROOT`, because the
-latter is substituted for hook commands only and is empty in a call you make. An argument goes after the script name and
+latter is substituted for hook commands only and is empty in a call you make. And the cache
+branch takes `ls -dt ... | head -1` rather than the bare glob it used to: the cache keeps
+EVERY version ever installed, a shell glob sorts them lexically, and the loop breaks on the
+first hit, so `1.0.0` beat `1.5.1` and a plugin user who had ever updated kept running the
+digest they first installed [measured 2026-08-19, eight versions in one cache]. Newest by
+write time is the one that was just installed. An argument goes after the script name and
 overrides the window: `24h`, `90m`, `3d`, or a date. It prints facts only, capped at a character budget, and
 it names what it had to cut. Pass that on rather than hiding it.
 

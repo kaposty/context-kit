@@ -340,6 +340,27 @@ user_msgs, assistant_tail, failures, denials = [], [], [], []
 started, finished, compactions = [], set(), 0
 tools = {}
 
+# WHOSE LINE IS THIS. Reported from the field on 2026-08-19: in a working copy shared by
+# several sessions the digest reads the transcripts of ALL of them, which is right for a
+# briefing about a PERSON's day, and it listed messages the user had sent to other sessions
+# with nothing saying so. The reader then has to re-derive, per line, which conversation it
+# came from, and the budget cuts exactly the blocks that carry the difference.
+#
+# The mark is added ONLY when more than one session is actually in the window. A single
+# session is the ordinary case and pays nothing, the same rule the restore verdict follows.
+_sids = []
+for e in win:
+    _s = e.get("sessionId")
+    if _s and _s not in _sids:
+        _sids.append(_s)
+_shared = len(_sids) > 1
+
+def _mark(e):
+    if not _shared:
+        return ""
+    _s = e.get("sessionId") or ""
+    return "[%s] " % (_s[:4] or "????")
+
 for e in win:
     ts = e["timestamp"][:16].replace("T", " ")
     t = e.get("type")
@@ -368,7 +389,7 @@ for e in win:
             continue
         if raw.startswith("<") and "command-name" not in raw:
             continue
-        user_msgs.append("%s  %s" % (ts, " ".join(raw.split())[:160]))
+        user_msgs.append("%s  %s%s" % (ts, _mark(e), " ".join(raw.split())[:160]))
     elif t == "assistant":
         m = e.get("message") or {}
         for b in (m.get("content") or []):
@@ -382,7 +403,7 @@ for e in win:
             elif b.get("type") == "text":
                 txt = " ".join((b.get("text") or "").split())
                 if len(txt) > 40:
-                    assistant_tail.append("%s  %s" % (ts, txt[:240]))
+                    assistant_tail.append("%s  %s%s" % (ts, _mark(e), txt[:240]))
 
 # Staleness measured in WORK, not in clock time. An idle weekend leaves a carrier untouched
 # and nothing is lost; an afternoon of unflushed work is the actual risk. So the number
@@ -408,7 +429,9 @@ blocks.append(("WINDOW", "\n".join([
     "entries in window: %d, compactions: %d" % (len(win), compactions),
     # What was actually read, so a bound is visible as a number and not only as a note.
     "read: %d entries from %d of %d transcript file(s)" % (len(entries), files_read, len(files)),
-] + (["NOTE: read was bounded, %s. Say so in the briefing." % "; ".join(bounds)] if bounds else [])
+] + ([
+    "NOTE: %d sessions share this working copy, so lines below carry a [session] mark. Say so." % len(_sids),
+] if _shared else []) + (["NOTE: read was bounded, %s. Say so in the briefing." % "; ".join(bounds)] if bounds else [])
   + (["NOTE: no transcript for this directory was found, the transcript half is empty."] if not files else [])
   + (["NOTE: this working tree is %s commit(s) behind %s, so the GIT and CARRIERS facts below "
       "describe an older state than the branch. Say so in the briefing."

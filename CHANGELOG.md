@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.6.0 (2026-08-19)
+
+- **The ownership verdict was missing from the door that gets used all day.** All of the
+  attribution logic lived in the prime hook, which runs on `startup` and `clear`, while the
+  restore hook covers `compact`, `resume` and `fork` and carried none of it. Reported from
+  the field and then found in this repository's own log, two hooks in the same second: prime
+  logging `foreign=1` and the restore hook handing the very same ledger to the model with
+  nothing said. Another session's TASK stood in that context twice with no sign it was not
+  its own. A restore on those three sources now names the owner, before the body rather than
+  after it, and the log carries `foreign=` so the decision is visible without reading the
+  payload. It still restores: a session that has taken the work over needs the reasoning, and
+  refusing would turn an attribution problem into a lost-context problem. Foreign only, and
+  that is a decision rather than an omission, because an unsigned ledger names nobody to be
+  wrong about and a warning there would fire on every resume of every ledger nobody stamped.
+
+- **A plugin user who had ever updated was running the tools they first installed.** The
+  documented line for locating `brief-digest.sh` and `effect-probe.sh` globbed the plugin
+  cache and stopped at the first hit, and a shell glob sorts lexically, so `1.0.0` beat
+  `1.5.1`. The cache keeps every version ever installed: measured with eight of them in one
+  cache, `/brief` ran the digest from the first release and every fix since had never reached
+  that reader, silently, with no error to notice. The line now takes the newest by write time.
+  Found while repairing a shell alias that had the same glob and had turned into a multiple
+  read, which was the visible half of the same mistake.
+
+- **In a working copy shared by several sessions, quoted lines said nothing about where they
+  came from.** The digest resolves transcripts by working directory, so it reads all sessions
+  in that directory, which is right for a briefing about a person's day. What was wrong is
+  that messages the user had sent to OTHER sessions were listed together with their own,
+  unmarked, and the budget then cut the blocks that carried the difference. Lines now carry a
+  short session mark, and only when the window actually holds more than one session, so the
+  ordinary single-session case pays nothing for a distinction it does not have.
+
 ## 1.5.1 (2026-08-18)
 
 - **Following the documentation could wire the kit twice.** The two install paths are written
